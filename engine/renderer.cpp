@@ -27,6 +27,33 @@ inline double random_double() {
     return dist(rng);
 }
 
+inline double random_double(double min, double max) {
+    return min + (max - min) * random_double();
+}
+
+// Generate random point in unit sphere (rejection sampling)
+inline vec3 random_in_unit_sphere() {
+    while (true) {
+        vec3 p = {random_double(-1, 1), random_double(-1, 1), random_double(-1, 1)};
+        if (vec3_length_squared(p) < 1.0)
+            return p;
+    }
+}
+
+// Generate random unit vector (for true Lambertian)
+inline vec3 random_unit_vector() {
+    return vec3_normalize(random_in_unit_sphere());
+}
+
+// Generate random vector in hemisphere around normal
+inline vec3 random_on_hemisphere(vec3 normal) {
+    vec3 on_unit_sphere = random_unit_vector();
+    if (vec3_dot(on_unit_sphere, normal) > 0.0)
+        return on_unit_sphere;
+    else
+        return vec3_negate(on_unit_sphere);
+}
+
 bool Image::write_ppm(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
@@ -148,14 +175,17 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
         
         switch (mat.type) {
             case MaterialType::Lambertian: {
-                // Diffuse reflection - simple Lambertian approximation
-                // For Whitted-style, we use the normal direction as scattered direction
-                // This gives a simple diffuse look without Monte Carlo sampling
-                vec3 target = vec3_add(rec.point, rec.normal);
-                ray scattered = ray_create(rec.point, vec3_sub(target, rec.point));
+                // True Lambertian diffuse reflection with random scattering
+                vec3 scatter_direction = vec3_add(rec.normal, random_unit_vector());
+                
+                // Catch degenerate scatter direction (if random vector is opposite to normal)
+                if (vec3_length_squared(scatter_direction) < 1e-8) {
+                    scatter_direction = rec.normal;
+                }
+                
+                ray scattered = ray_create(rec.point, scatter_direction);
                 color attenuation = mat.albedo;
-                color scattered_color = ray_color(scattered, scene, depth - 1);
-                return vec3_mul(attenuation, vec3_scale(scattered_color, 0.5));
+                return vec3_mul(attenuation, ray_color(scattered, scene, depth - 1));
             }
             
             case MaterialType::Metal: {

@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
     settings.width = image_width;
     settings.height = image_height;
     settings.max_depth = 100;
-    settings.samples_per_pixel = 8;
+    settings.samples_per_pixel = 16;
     
     Renderer renderer(settings);
     
