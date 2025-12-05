@@ -9,7 +9,7 @@ However, I plan on using different, more advanced algorithms in the future, this
 - **C++ Engine Layer**: Scene management, materials, and rendering in C++23
 - **Whitted-style Rendering**: Recursive ray tracing with reflection and refraction
 - **Materials**: Lambertian (diffuse), Metal (reflective), and Dielectric (glass) materials
-- **PPM Image Output**: Portable image format for immediate viewing
+- **PNG Image Output**: For compatibility and ease of use.
 
 ## Project Structure
 
