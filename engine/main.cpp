@@ -63,6 +63,7 @@ int main(int argc, char* argv[]) {
     ToneMapper tone_mapper = ToneMapper::ACES;
     double exposure = 1.0;
     double clamp_max = 10.0;  // Firefly clamping for BDPT
+    int wavelength_samples = 8;  // For spectral rendering
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -87,6 +88,12 @@ int main(int argc, char* argv[]) {
         if (arg == "--bdpt" || arg == "-b") {
             render_mode = RenderMode::BDPT;
             samples = 64;  // BDPT also needs more samples
+            continue;
+        }
+        
+        if (arg == "--spectral" || arg == "-s") {
+            render_mode = RenderMode::Spectral;
+            samples = 64;  // Spectral needs more samples
             continue;
         }
         
@@ -138,6 +145,12 @@ int main(int argc, char* argv[]) {
             continue;
         }
         
+        // --wavelengths N flag (wavelength samples for spectral rendering)
+        if (arg == "--wavelengths" && i + 1 < argc) {
+            wavelength_samples = std::stoi(argv[++i]);
+            continue;
+        }
+        
         // Check if it's a JSON file
         if (arg.size() > 5 && arg.substr(arg.size() - 5) == ".json") {
             auto data = SceneLoader::load(arg);
@@ -159,6 +172,7 @@ int main(int argc, char* argv[]) {
                 tone_mapper = data.tone_mapper;
                 exposure = data.exposure;
                 clamp_max = data.clamp_max;
+                wavelength_samples = data.wavelength_samples;
                 loaded_scene = true;
             }
         } else if (arg[0] != '-') {
@@ -188,6 +202,7 @@ int main(int argc, char* argv[]) {
     settings.tone_mapper = tone_mapper;
     settings.exposure = exposure;
     settings.clamp_max = clamp_max;
+    settings.wavelength_samples = wavelength_samples;
     
     Renderer renderer(settings);
     

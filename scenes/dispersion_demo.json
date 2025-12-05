@@ -1,0 +1,82 @@
+{
+    "name": "Glass Sphere Dispersion Demo",
+    "description": "Glass sphere showing chromatic dispersion - different wavelengths refract at different angles",
+    
+    "camera": {
+        "position": [0, 1, 6],
+        "target": [0, 0, 0],
+        "up": [0, 1, 0],
+        "fov": 45
+    },
+    
+    "render": {
+        "width": 800,
+        "height": 600,
+        "samples": 128,
+        "max_depth": 20,
+        "mode": "spectral",
+        "wavelength_samples": 32,
+        "output": "dispersion_sphere.png",
+        "tonemapper": "aces",
+        "exposure": 1.2
+    },
+    
+    "materials": {
+        "white_floor": {
+            "type": "lambertian",
+            "color": [0.9, 0.9, 0.9]
+        },
+        "glass_sphere": {
+            "type": "dielectric",
+            "ior": 1.7,
+            "comment": "High-dispersion flint glass - will use SF11 in spectral mode"
+        },
+        "gray_wall": {
+            "type": "lambertian", 
+            "color": [0.7, 0.7, 0.7]
+        }
+    },
+    
+    "objects": [
+        {
+            "type": "plane",
+            "comment": "White floor to catch rainbow caustics",
+            "position": [0, -1, 0],
+            "normal": [0, 1, 0],
+            "material": "white_floor"
+        },
+        {
+            "type": "plane",
+            "comment": "Back wall",
+            "position": [0, 0, -5],
+            "normal": [0, 0, 1],
+            "material": "gray_wall"
+        },
+        {
+            "type": "sphere",
+            "comment": "Glass sphere - will show dispersion rainbow",
+            "center": [0, 0, 0],
+            "radius": 1.0,
+            "material": "glass_sphere"
+        }
+    ],
+    
+    "lights": [
+        {
+            "type": "point",
+            "comment": "Bright point light to create strong caustics",
+            "position": [-3, 4, 3],
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 15.0
+        },
+        {
+            "type": "quad",
+            "comment": "Area light for softer illumination",
+            "corner": [-1, 4, -1],
+            "edge_u": [2, 0, 0],
+            "edge_v": [0, 0, 2],
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 3.0
+        }
+    ]
+}

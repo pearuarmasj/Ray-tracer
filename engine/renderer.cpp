@@ -5,6 +5,7 @@
 
 #include "renderer.hpp"
 #include "bdpt.hpp"
+#include "spectral/spectral_renderer.hpp"
 #include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
@@ -258,6 +259,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     switch (settings_.mode) {
         case RenderMode::PathTrace: mode_name = "Path Tracing"; break;
         case RenderMode::BDPT: mode_name = "Bidirectional Path Tracing"; break;
+        case RenderMode::Spectral: mode_name = "Spectral Path Tracing"; break;
         default: mode_name = "Whitted"; break;
     }
     
@@ -266,6 +268,9 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     if (settings_.mode == RenderMode::PathTrace) {
         std::cout << ", NEE=" << (settings_.use_nee ? "on" : "off")
                   << ", MIS=" << (settings_.use_mis ? "on" : "off");
+    }
+    if (settings_.mode == RenderMode::Spectral) {
+        std::cout << ", " << settings_.wavelength_samples << " wavelength samples";
     }
     std::cout << ")";
     
@@ -286,6 +291,35 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         bdpt_settings.use_mis = settings_.use_mis;
         bdpt_settings.clamp_max = settings_.clamp_max;
         bdpt = BDPTIntegrator(bdpt_settings);
+    }
+    
+    // Create spectral integrator and materials if needed
+    spectral::SpectralIntegrator spectral_integrator;
+    std::vector<spectral::SpectralMaterial> spectral_materials;
+    if (settings_.mode == RenderMode::Spectral) {
+        spectral::SpectralIntegrator::Settings spec_settings;
+        spec_settings.max_depth = settings_.max_depth;
+        spectral_integrator = spectral::SpectralIntegrator(spec_settings);
+        
+        // Create spectral materials from scene materials
+        for (const auto& mat : scene.materials) {
+            spectral::SpectralMaterial smat;
+            
+            // Set albedo spectrum
+            smat.albedo_spectrum = spectral::data::RGBSpectrum(
+                mat.albedo.x, mat.albedo.y, mat.albedo.z);
+            
+            // For dielectrics, use dispersive glass (SF11 for visible dispersion)
+            if (mat.type == MaterialType::Dielectric) {
+                // High-dispersion flint glass for nice rainbows
+                smat.dispersion = spectral::Dispersion(spectral::materials::SF11());
+            } else {
+                // Non-dispersive
+                smat.dispersion = spectral::Dispersion(mat.refraction_index);
+            }
+            
+            spectral_materials.push_back(smat);
+        }
     }
     
     std::atomic<int> completed_lines{0};
@@ -311,6 +345,12 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
                     case RenderMode::BDPT:
                         pixel_color = vec3_add(pixel_color, bdpt.Li(r, scene));
                         break;
+                    case RenderMode::Spectral: {
+                        color spec_color = spectral_integrator.render_pixel_spectral(
+                            r, scene, spectral_materials, settings_.wavelength_samples);
+                        pixel_color = vec3_add(pixel_color, spec_color);
+                        break;
+                    }
                     default:
                         pixel_color = vec3_add(pixel_color, ray_color_whitted(r, scene, settings_.max_depth));
                         break;

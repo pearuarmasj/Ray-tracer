@@ -25,7 +25,8 @@ namespace raytracer {
 enum class RenderMode {
     Whitted,    // Classic Whitted-style ray tracing (fast, explicit lights)
     PathTrace,  // Monte Carlo path tracing (slow, global illumination)
-    BDPT        // Bidirectional path tracing (better caustics, complex lighting)
+    BDPT,       // Bidirectional path tracing (better caustics, complex lighting)
+    Spectral    // Spectral path tracing (wavelength-dependent, dispersion)
 };
 
 /**
@@ -106,6 +107,7 @@ public:
         ToneMapper tone_mapper = ToneMapper::ACES;  // Tone mapping operator
         double exposure = 1.0;       // Exposure adjustment (multiplier before tone mapping)
         double clamp_max = 10.0;     // Firefly clamping for BDPT (0 = disabled)
+        int wavelength_samples = 8;  // Wavelength samples per pixel (spectral mode)
     };
     
     Renderer() = default;

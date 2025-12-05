@@ -1,0 +1,77 @@
+﻿{
+    "name": "Prism Dispersion Demo",
+    "description": "Classical prism experiment - white light splits into rainbow spectrum",
+    
+    "camera": {
+        "position": [0, 0.5, 5],
+        "target": [0, 0, 0],
+        "up": [0, 1, 0],
+        "fov": 40
+    },
+    
+    "render": {
+        "width": 800,
+        "height": 600,
+        "samples": 128,
+        "max_depth": 15,
+        "mode": "path",
+        "wavelength_samples": 32,
+        "output": "prism_rainbow.png",
+        "tonemapper": "aces",
+        "exposure": 1.0
+    },
+    
+    "materials": {
+        "glass_prism": {
+            "type": "dielectric",
+            "ior": 1.52,
+            "comment": "Crown glass - visible dispersion"
+        },
+        "white_ground": {
+            "type": "lambertian",
+            "color": [0.8, 0.8, 0.8]
+        },
+        "back_screen": {
+            "type": "lambertian", 
+            "color": [0.9, 0.9, 0.9]
+        }
+    },
+    
+    "objects": [
+        {
+            "type": "sphere",
+            "comment": "Glass sphere to demonstrate dispersion",
+            "center": [0, 0, 0],
+            "radius": 1.0,
+            "material": "glass_prism"
+        },
+        {
+            "type": "plane",
+            "comment": "Ground plane",
+            "position": [0, -1.5, 0],
+            "normal": [0, 1, 0],
+            "material": "white_ground"
+        },
+        {
+            "type": "plane",
+            "comment": "Back wall to catch refracted light",
+            "position": [0, 0, -3],
+            "normal": [0, 0, 1],
+            "material": "back_screen"
+        }
+    ],
+    
+    "lights": [
+        {
+            "type": "quad",
+            "comment": "Large area light above and behind camera",
+            "position": [0, 4, 4],
+            "width": 4.0,
+            "height": 4.0,
+            "normal": [0, -0.5, -0.866],
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 8.0
+        }
+    ]
+}
+

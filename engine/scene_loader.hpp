@@ -44,6 +44,7 @@ public:
         ToneMapper tone_mapper = ToneMapper::ACES;
         double exposure = 1.0;
         double clamp_max = 10.0;  // Firefly clamping
+        int wavelength_samples = 8;  // For spectral rendering
         
         std::string output_file = "output.png";
     };
@@ -306,6 +307,7 @@ public:
             data.use_mis = r.value("mis", true);
             data.exposure = r.value("exposure", 1.0);
             data.clamp_max = r.value("clamp_max", 10.0);
+            data.wavelength_samples = r.value("wavelength_samples", 8);
             
             // Parse render mode
             std::string mode_str = r.value("mode", "whitted");
@@ -313,6 +315,8 @@ public:
                 data.mode = RenderMode::PathTrace;
             } else if (mode_str == "bdpt" || mode_str == "bidirectional") {
                 data.mode = RenderMode::BDPT;
+            } else if (mode_str == "spectral" || mode_str == "wavelength") {
+                data.mode = RenderMode::Spectral;
             } else {
                 data.mode = RenderMode::Whitted;
             }
