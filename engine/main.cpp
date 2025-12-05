@@ -21,14 +21,14 @@ Scene create_demo_scene() {
     Scene scene;
     
     // Add materials
-    int mat_ground = scene.add_material(Material::lambertian({0.8, 0.8, 0.0}));
+    int mat_ground = scene.add_material(Material::lambertian({0.3, 0.3, 0.3}));  // Dark gray ground
     int mat_center = scene.add_material(Material::lambertian({0.1, 0.2, 0.5}));
     int mat_left = scene.add_material(Material::dielectric(1.5));
     int mat_right = scene.add_material(Material::metal({0.8, 0.6, 0.2}, 0.0));
+    int mat_box = scene.add_material(Material::lambertian({0.7, 0.3, 0.3}));     // Red box
     
-    // Add spheres
-    // Ground sphere (large, acts as floor)
-    scene.add_sphere({0.0, -100.5, -1.0}, 100.0, mat_ground);
+    // Ground plane (infinite, much cleaner than huge sphere)
+    scene.add_plane({0.0, -0.5, 0.0}, {0.0, 1.0, 0.0}, mat_ground);
     
     // Center sphere (diffuse blue)
     scene.add_sphere({0.0, 0.0, -1.0}, 0.5, mat_center);
@@ -38,6 +38,9 @@ Scene create_demo_scene() {
     
     // Right sphere (metal gold)
     scene.add_sphere({1.0, 0.0, -1.0}, 0.5, mat_right);
+    
+    // Add a box behind the spheres
+    scene.add_box_centered({0.0, 0.25, -2.5}, 1.0, 1.5, 1.0, mat_box);
     
     // Add lights
     scene.add_light({-2.0, 3.0, 1.0}, {0.6, 0.6, 0.6});  // Main light (upper left)
@@ -61,10 +64,10 @@ int main(int argc, char* argv[]) {
     const double aspect_ratio = static_cast<double>(image_width) / image_height;
     
     // Create camera
-    point3 lookfrom = {0.0, 0.0, 0.0};
+    point3 lookfrom = {3.0, 2.0, 4.0};   // Pulled back and up
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
-    double vfov = 90.0;
+    double vfov = 50.0;  // Narrower FOV for less distortion
     
     Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio);
     

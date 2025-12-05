@@ -12,6 +12,7 @@ extern "C" {
 }
 
 #include "sphere.hpp"
+#include "primitives.hpp"
 #include "material.hpp"
 #include <vector>
 #include <limits>
@@ -94,6 +95,9 @@ struct Camera {
 class Scene {
 public:
     std::vector<Sphere> spheres;
+    std::vector<Plane> planes;
+    std::vector<Triangle> triangles;
+    std::vector<Box> boxes;
     std::vector<Material> materials;
     std::vector<PointLight> lights;
     
@@ -111,6 +115,34 @@ public:
      */
     void add_sphere(point3 center, double radius, int material_id) {
         spheres.emplace_back(center, radius, material_id);
+    }
+    
+    /**
+     * @brief Add a plane to the scene
+     */
+    void add_plane(point3 point, vec3 normal, int material_id) {
+        planes.emplace_back(point, normal, material_id);
+    }
+    
+    /**
+     * @brief Add a triangle to the scene
+     */
+    void add_triangle(point3 v0, point3 v1, point3 v2, int material_id) {
+        triangles.emplace_back(v0, v1, v2, material_id);
+    }
+    
+    /**
+     * @brief Add an axis-aligned box to the scene
+     */
+    void add_box(point3 min_pt, point3 max_pt, int material_id) {
+        boxes.emplace_back(min_pt, max_pt, material_id);
+    }
+    
+    /**
+     * @brief Add a centered box to the scene
+     */
+    void add_box_centered(point3 center, double w, double h, double d, int material_id) {
+        boxes.push_back(Box::centered(center, w, h, d, material_id));
     }
     
     /**
@@ -154,6 +186,30 @@ public:
         
         for (const auto& sphere : spheres) {
             if (sphere.hit(r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+            }
+        }
+        
+        for (const auto& plane : planes) {
+            if (plane.hit(r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+            }
+        }
+        
+        for (const auto& triangle : triangles) {
+            if (triangle.hit(r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+            }
+        }
+        
+        for (const auto& box : boxes) {
+            if (box.hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
                 rec = temp_rec;
