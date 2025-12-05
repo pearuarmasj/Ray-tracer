@@ -1,0 +1,88 @@
+{
+    "render": {
+        "width": 2560,
+        "height": 1440,
+        "samples": 32,
+        "max_depth": 50,
+        "output": "output.png"
+    },
+    
+    "camera": {
+        "position": [3, 2, 4],
+        "target": [0, 0, -1],
+        "up": [0, 1, 0],
+        "fov": 50
+    },
+    
+    "materials": {
+        "ground": {
+            "type": "lambertian",
+            "color": [0.3, 0.3, 0.3]
+        },
+        "blue_diffuse": {
+            "type": "lambertian",
+            "color": [0.1, 0.2, 0.5]
+        },
+        "glass": {
+            "type": "glass",
+            "ior": 1.5
+        },
+        "gold": {
+            "type": "metal",
+            "color": [0.8, 0.6, 0.2],
+            "fuzz": 0.0
+        },
+        "red": {
+            "type": "lambertian",
+            "color": [0.7, 0.3, 0.3]
+        }
+    },
+    
+    "objects": [
+        {
+            "type": "plane",
+            "position": [0, -0.5, 0],
+            "normal": [0, 1, 0],
+            "material": "ground"
+        },
+        {
+            "type": "sphere",
+            "position": [0, 0, -1],
+            "radius": 0.5,
+            "material": "blue_diffuse"
+        },
+        {
+            "type": "sphere",
+            "position": [-1, 0, -1],
+            "radius": 0.5,
+            "material": "glass"
+        },
+        {
+            "type": "sphere",
+            "position": [1, 0, -1],
+            "radius": 0.5,
+            "material": "gold"
+        },
+        {
+            "type": "box",
+            "position": [0, 0.25, -2.5],
+            "width": 1.0,
+            "height": 1.5,
+            "depth": 1.0,
+            "material": "red"
+        }
+    ],
+    
+    "lights": [
+        {
+            "position": [-2, 3, 1],
+            "color": [1, 1, 1],
+            "intensity": 0.6
+        },
+        {
+            "position": [2, 2, 2],
+            "color": [1, 1, 1],
+            "intensity": 0.3
+        }
+    ]
+}
