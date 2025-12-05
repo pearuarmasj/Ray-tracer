@@ -14,6 +14,7 @@ extern "C" {
 #include "sphere.hpp"
 #include "primitives.hpp"
 #include "material.hpp"
+#include "texture.hpp"
 #include "bvh.hpp"
 #include <vector>
 #include <limits>
@@ -108,6 +109,9 @@ public:
     std::vector<Box> boxes;
     std::vector<Material> materials;
     std::vector<PointLight> lights;
+    
+    // Environment map for HDR sky lighting (optional)
+    std::shared_ptr<EnvironmentMap> environment;
     
 private:
     mutable BVH bvh_;

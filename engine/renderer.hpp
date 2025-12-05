@@ -115,9 +115,11 @@ private:
     color ray_color_path(ray r, const Scene& scene, int depth) const;
     
     /**
-     * @brief Calculate background color (sky gradient)
+     * @brief Calculate background color (sky gradient or environment map)
+     * @param r Ray direction for environment map sampling
+     * @param scene Scene containing optional environment map
      */
-    color background_color(ray r) const;
+    color background_color(ray r, const Scene& scene) const;
 };
 
 } // namespace raytracer

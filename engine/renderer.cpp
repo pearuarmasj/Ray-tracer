@@ -253,7 +253,7 @@ color Renderer::ray_color_whitted(ray r, const Scene& scene, int depth) const {
     }
     
     // No hit - return background color
-    return background_color(r);
+    return background_color(r, scene);
 }
 
 color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
@@ -336,10 +336,16 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
     }
     
     // No hit - return background color (acts as environment light)
-    return background_color(r);
+    return background_color(r, scene);
 }
 
-color Renderer::background_color(ray r) const {
+color Renderer::background_color(ray r, const Scene& scene) const {
+    // Sample environment map if present
+    if (scene.environment && scene.environment->valid()) {
+        return scene.environment->sample(r.direction);
+    }
+    
+    // Fall back to sky gradient
     vec3 unit_direction = vec3_normalize(r.direction);
     double t = 0.5 * (unit_direction.y + 1.0);
     return vec3_lerp(settings_.background_bottom, settings_.background_top, t);

@@ -240,11 +240,34 @@ public:
             }
         }
         
+        // Load environment map (HDR sky lighting)
+        if (j.contains("environment")) {
+            auto& env = j["environment"];
+            std::string env_file = env.value("file", "");
+            
+            if (!env_file.empty()) {
+                double env_intensity = env.value("intensity", 1.0);
+                double env_rotation = env.value("rotation", 0.0);
+                
+                auto envmap = std::make_shared<EnvironmentMap>(
+                    EnvironmentMap::load(env_file, env_intensity, env_rotation)
+                );
+                
+                if (envmap->valid()) {
+                    data.scene.environment = envmap;
+                }
+            }
+        }
+        
         std::cout << "Loaded scene: " << data.scene.spheres.size() << " spheres, "
                   << data.scene.planes.size() << " planes, "
                   << data.scene.boxes.size() << " boxes, "
                   << data.scene.triangles.size() << " triangles, "
-                  << data.scene.lights.size() << " lights" << std::endl;
+                  << data.scene.lights.size() << " lights";
+        if (data.scene.environment) {
+            std::cout << ", environment map";
+        }
+        std::cout << std::endl;
         
         return data;
     }

@@ -2,7 +2,7 @@
     "render": {
         "width": 2560,
         "height": 1440,
-        "samples": 32,
+        "samples": 64,
         "max_depth": 50,
         "output": "output.png"
     },

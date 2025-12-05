@@ -57,10 +57,10 @@
         "fov": 45
     },
     "render": {
-        "width": 1280,
-        "height": 720,
-        "samples": 32,
-        "max_depth": 50,
+        "width": 2560,
+        "height": 1440,
+        "samples": 128,
+        "max_depth": 100,
         "mode": "whitted",
         "output": "earth_demo.png"
     }
