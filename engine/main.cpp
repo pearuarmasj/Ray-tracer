@@ -58,6 +58,8 @@ int main(int argc, char* argv[]) {
     int samples = 16;
     int max_depth = 50;
     RenderMode render_mode = RenderMode::Whitted;
+    bool use_nee = true;
+    bool use_mis = true;
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -95,6 +97,8 @@ int main(int argc, char* argv[]) {
                 max_depth = data.max_depth;
                 output_file = data.output_file;
                 render_mode = data.mode;
+                use_nee = data.use_nee;
+                use_mis = data.use_mis;
                 loaded_scene = true;
             }
         } else if (arg[0] != '-') {
@@ -119,6 +123,8 @@ int main(int argc, char* argv[]) {
     settings.max_depth = max_depth;
     settings.samples_per_pixel = samples;
     settings.mode = render_mode;
+    settings.use_nee = use_nee;
+    settings.use_mis = use_mis;
     
     Renderer renderer(settings);
     

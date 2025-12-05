@@ -23,6 +23,22 @@ extern "C" {
 
 namespace raytracer {
 
+// Forward declare random functions
+double random_double();
+double random_double(double min, double max);
+
+/**
+ * @brief Light sample result for NEE
+ */
+struct LightSample {
+    point3 position;      // Point on light
+    vec3 normal;          // Normal at light point
+    color emission;       // Light emission
+    double pdf;           // Probability density of this sample
+    double distance;      // Distance from surface to light
+    bool valid;           // Whether sample is valid
+};
+
 /**
  * @brief Point light source
  */
@@ -172,6 +188,135 @@ public:
      */
     void add_light(point3 position, color intensity) {
         lights.emplace_back(position, intensity);
+    }
+    
+    /**
+     * @brief Get list of emissive sphere indices for NEE
+     */
+    std::vector<size_t> get_emissive_spheres() const {
+        std::vector<size_t> result;
+        for (size_t i = 0; i < spheres.size(); ++i) {
+            if (materials[spheres[i].material_id].is_emissive()) {
+                result.push_back(i);
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * @brief Sample a random point on an emissive sphere
+     * @param sphere_idx Index of sphere in spheres vector
+     * @param from_point Point we're sampling from (for solid angle PDF)
+     * @return LightSample with position, emission, and PDF
+     */
+    LightSample sample_sphere_light(size_t sphere_idx, point3 from_point) const {
+        LightSample sample;
+        sample.valid = false;
+        
+        if (sphere_idx >= spheres.size()) return sample;
+        
+        const Sphere& s = spheres[sphere_idx];
+        const Material& mat = materials[s.material_id];
+        
+        // Direction from surface point to sphere center
+        vec3 to_center = vec3_sub(s.center, from_point);
+        double dist_sq = vec3_length_squared(to_center);
+        double dist = std::sqrt(dist_sq);
+        
+        // Sample uniformly on sphere visible hemisphere
+        // For simplicity, sample uniformly on whole sphere surface
+        double z = 1.0 - 2.0 * random_double();
+        double r = std::sqrt(std::fmax(0.0, 1.0 - z * z));
+        double phi = 2.0 * 3.14159265358979323846 * random_double();
+        
+        vec3 local_point = {r * std::cos(phi), r * std::sin(phi), z};
+        sample.position = vec3_add(s.center, vec3_scale(local_point, s.radius));
+        sample.normal = local_point;  // Already unit length
+        sample.emission = mat.emission;
+        
+        // PDF: 1 / surface_area
+        double area = 4.0 * 3.14159265358979323846 * s.radius * s.radius;
+        sample.pdf = 1.0 / area;
+        
+        // Distance to sampled point
+        vec3 to_sample = vec3_sub(sample.position, from_point);
+        sample.distance = vec3_length(to_sample);
+        sample.valid = true;
+        
+        return sample;
+    }
+    
+    /**
+     * @brief Sample a light source (emissive geometry or point light)
+     * @param from_point Surface point to sample from
+     * @return LightSample, or invalid if no lights
+     */
+    LightSample sample_light(point3 from_point) const {
+        LightSample sample;
+        sample.valid = false;
+        
+        // Collect all light sources
+        auto emissive_spheres = get_emissive_spheres();
+        size_t total_lights = lights.size() + emissive_spheres.size();
+        
+        if (total_lights == 0) return sample;
+        
+        // Pick a random light uniformly
+        size_t light_idx = static_cast<size_t>(random_double() * total_lights);
+        if (light_idx >= total_lights) light_idx = total_lights - 1;
+        
+        if (light_idx < lights.size()) {
+            // Point light
+            const PointLight& pl = lights[light_idx];
+            sample.position = pl.position;
+            sample.normal = {0, -1, 0};  // Point lights don't have orientation
+            sample.emission = pl.intensity;
+            sample.pdf = 1.0;  // Delta distribution for point
+            vec3 to_light = vec3_sub(pl.position, from_point);
+            sample.distance = vec3_length(to_light);
+            sample.valid = true;
+        } else {
+            // Emissive sphere
+            size_t sphere_idx = emissive_spheres[light_idx - lights.size()];
+            sample = sample_sphere_light(sphere_idx, from_point);
+        }
+        
+        // Adjust PDF for light selection probability
+        if (sample.valid) {
+            sample.pdf /= static_cast<double>(total_lights);
+        }
+        
+        return sample;
+    }
+    
+    /**
+     * @brief Compute PDF for sampling a specific point on lights
+     * @param from_point Surface point
+     * @param light_point Point on light
+     * @return PDF value
+     */
+    double light_pdf(point3 from_point, point3 light_point) const {
+        auto emissive_spheres = get_emissive_spheres();
+        size_t total_lights = lights.size() + emissive_spheres.size();
+        
+        if (total_lights == 0) return 0.0;
+        
+        // Check which light this point belongs to
+        for (size_t i = 0; i < emissive_spheres.size(); ++i) {
+            const Sphere& s = spheres[emissive_spheres[i]];
+            vec3 to_center = vec3_sub(light_point, s.center);
+            double dist_sq = vec3_length_squared(to_center);
+            double r_sq = s.radius * s.radius;
+            
+            // Point is on sphere surface (within tolerance)
+            if (std::abs(dist_sq - r_sq) < r_sq * 0.01) {
+                double area = 4.0 * 3.14159265358979323846 * r_sq;
+                return (1.0 / area) / static_cast<double>(total_lights);
+            }
+        }
+        
+        // Point light (delta) - return 0 for area PDF
+        return 0.0;
     }
     
     /**

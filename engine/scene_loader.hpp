@@ -39,6 +39,8 @@ public:
         int samples = 16;
         int max_depth = 50;
         RenderMode mode = RenderMode::Whitted;
+        bool use_nee = true;
+        bool use_mis = true;
         
         std::string output_file = "output.png";
     };
@@ -230,6 +232,8 @@ public:
             data.samples = r.value("samples", 16);
             data.max_depth = r.value("max_depth", 50);
             data.output_file = r.value("output", "output.png");
+            data.use_nee = r.value("nee", true);
+            data.use_mis = r.value("mis", true);
             
             // Parse render mode
             std::string mode_str = r.value("mode", "whitted");

@@ -82,6 +82,8 @@ public:
         color background_top = {0.5, 0.7, 1.0};    // Sky gradient top
         color background_bottom = {1.0, 1.0, 1.0}; // Sky gradient bottom
         RenderMode mode = RenderMode::Whitted;     // Rendering algorithm
+        bool use_nee = true;         // Next Event Estimation (direct light sampling)
+        bool use_mis = true;         // Multiple Importance Sampling
     };
     
     Renderer() = default;

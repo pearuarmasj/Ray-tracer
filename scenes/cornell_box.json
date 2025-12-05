@@ -31,54 +31,54 @@
     "objects": [
         {
             "type": "plane",
-            "point": [0, 0, 0],
+            "position": [0, 0, 0],
             "normal": [0, 1, 0],
             "material": "white",
             "comment": "floor"
         },
         {
             "type": "plane",
-            "point": [0, 5, 0],
+            "position": [0, 5, 0],
             "normal": [0, -1, 0],
             "material": "white",
             "comment": "ceiling"
         },
         {
             "type": "plane",
-            "point": [0, 0, -5],
+            "position": [0, 0, -5],
             "normal": [0, 0, 1],
             "material": "white",
             "comment": "back wall"
         },
         {
             "type": "plane",
-            "point": [-2.5, 0, 0],
+            "position": [-2.5, 0, 0],
             "normal": [1, 0, 0],
             "material": "red",
             "comment": "left wall"
         },
         {
             "type": "plane",
-            "point": [2.5, 0, 0],
+            "position": [2.5, 0, 0],
             "normal": [-1, 0, 0],
             "material": "green",
             "comment": "right wall"
         },
         {
             "type": "sphere",
-            "center": [-1.0, 0.8, -2.5],
+            "position": [-1.0, 0.8, -2.5],
             "radius": 0.8,
             "material": "glass"
         },
         {
             "type": "sphere",
-            "center": [1.0, 0.6, -3.0],
+            "position": [1.0, 0.6, -3.0],
             "radius": 0.6,
             "material": "metal"
         },
         {
             "type": "sphere",
-            "center": [0.0, 4.5, -2.5],
+            "position": [0.0, 4.5, -2.5],
             "radius": 0.5,
             "material": "light",
             "comment": "area light"
