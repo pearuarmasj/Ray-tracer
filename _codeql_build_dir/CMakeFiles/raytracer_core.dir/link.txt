@@ -1,0 +1,2 @@
+/usr/bin/ar qc libraytracer_core.a CMakeFiles/raytracer_core.dir/core/vec3.c.o CMakeFiles/raytracer_core.dir/core/ray.c.o CMakeFiles/raytracer_core.dir/core/hit.c.o
+/usr/bin/ranlib libraytracer_core.a

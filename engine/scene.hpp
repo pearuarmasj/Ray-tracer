@@ -15,6 +15,7 @@ extern "C" {
 #include "material.hpp"
 #include <vector>
 #include <limits>
+#include <cmath>
 
 namespace raytracer {
 

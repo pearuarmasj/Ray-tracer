@@ -1,0 +1,4 @@
+/home/runner/work/Ray-tracer/Ray-tracer/_codeql_build_dir/CMakeFiles/raytracer_core.dir
+/home/runner/work/Ray-tracer/Ray-tracer/_codeql_build_dir/CMakeFiles/raytracer.dir
+/home/runner/work/Ray-tracer/Ray-tracer/_codeql_build_dir/CMakeFiles/edit_cache.dir
+/home/runner/work/Ray-tracer/Ray-tracer/_codeql_build_dir/CMakeFiles/rebuild_cache.dir

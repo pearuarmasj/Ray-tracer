@@ -56,8 +56,8 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
             for (int s = 0; s < settings_.samples_per_pixel; ++s) {
                 // For single sample, use center of pixel
                 // For multiple samples, could add random offset (not implemented for simplicity)
-                double u = (static_cast<double>(x) + 0.5) / (settings_.width - 1);
-                double v = (static_cast<double>(y) + 0.5) / (settings_.height - 1);
+                double u = (static_cast<double>(x) + 0.5) / settings_.width;
+                double v = (static_cast<double>(y) + 0.5) / settings_.height;
                 
                 ray r = camera.get_ray(u, v);
                 pixel_color = vec3_add(pixel_color, ray_color(r, scene, settings_.max_depth));
