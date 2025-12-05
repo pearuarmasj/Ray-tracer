@@ -1,7 +1,6 @@
-﻿# CMakeList.txt : CMake project for Ray tracer, include source and define
-# project specific logic here.
-#
-cmake_minimum_required (VERSION 3.10)
+# CMakeList.txt : CMake project for Ray tracer
+# Mixed C23/C++23 Whitted-style ray tracer
+cmake_minimum_required(VERSION 3.21)
 
 # Enable Hot Reload for MSVC compilers if supported.
 if (POLICY CMP0141)
@@ -9,13 +8,57 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project ("Ray tracer")
+project("Ray tracer" LANGUAGES C CXX)
 
-# Add source to this project's executable.
-add_executable (CMakeTarget  )
+# Language standards
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET CMakeTarget PROPERTY CXX_STANDARD 20)
+# C Core library (vec3, ray, hit)
+set(CORE_SOURCES
+    core/vec3.c
+    core/ray.c
+    core/hit.c
+)
+
+set(CORE_HEADERS
+    core/vec3.h
+    core/ray.h
+    core/hit.h
+)
+
+add_library(raytracer_core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
+target_include_directories(raytracer_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# C++ Engine (renderer, scene, materials)
+set(ENGINE_SOURCES
+    engine/renderer.cpp
+    engine/main.cpp
+)
+
+set(ENGINE_HEADERS
+    engine/renderer.hpp
+    engine/scene.hpp
+    engine/sphere.hpp
+    engine/material.hpp
+)
+
+add_executable(raytracer ${ENGINE_SOURCES} ${ENGINE_HEADERS})
+target_link_libraries(raytracer PRIVATE raytracer_core)
+target_include_directories(raytracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Enable math library on Unix
+if(UNIX)
+    target_link_libraries(raytracer_core PRIVATE m)
 endif()
 
-# TODO: Add tests and install targets if needed.
+# Compiler warnings
+if(MSVC)
+    target_compile_options(raytracer_core PRIVATE /W4)
+    target_compile_options(raytracer PRIVATE /W4)
+else()
+    target_compile_options(raytracer_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(raytracer PRIVATE -Wall -Wextra -Wpedantic)
+endif()
