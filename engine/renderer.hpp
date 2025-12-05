@@ -49,6 +49,13 @@ struct Image {
      * @return true on success
      */
     bool write_ppm(const std::string& filename) const;
+    
+    /**
+     * @brief Write image to PNG file
+     * @param filename Output filename
+     * @return true on success
+     */
+    bool write_png(const std::string& filename) const;
 };
 
 /**

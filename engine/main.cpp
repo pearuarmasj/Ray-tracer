@@ -46,7 +46,7 @@ int main(int argc, char* argv[]) {
     std::cout << "=== Whitted-Style Ray Tracer ===" << std::endl;
     
     // Parse command line for output filename
-    std::string output_file = "output.ppm";
+    std::string output_file = "output.png";
     if (argc > 1) {
         output_file = argv[1];
     }
@@ -79,8 +79,15 @@ int main(int argc, char* argv[]) {
     // Render!
     Image image = renderer.render(scene, camera);
     
-    // Save output
-    if (image.write_ppm(output_file)) {
+    // Save output (use PNG if filename ends with .png, otherwise PPM)
+    bool success = false;
+    if (output_file.size() >= 4 && output_file.substr(output_file.size() - 4) == ".png") {
+        success = image.write_png(output_file);
+    } else {
+        success = image.write_ppm(output_file);
+    }
+    
+    if (success) {
         std::cout << "Image saved to: " << output_file << std::endl;
     } else {
         std::cerr << "Error: Failed to save image to " << output_file << std::endl;

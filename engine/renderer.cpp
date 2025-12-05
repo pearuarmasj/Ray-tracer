@@ -4,10 +4,12 @@
  */
 
 #include "renderer.hpp"
+#include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <vector>
 
 namespace raytracer {
 
@@ -38,6 +40,36 @@ bool Image::write_ppm(const std::string& filename) const {
     }
     
     return true;
+}
+
+bool Image::write_png(const std::string& filename) const {
+    // Convert floating-point pixels to 8-bit RGB
+    std::vector<unsigned char> data(width * height * 3);
+    
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = 0; x < width; ++x) {
+            color c = get_pixel(x, y);
+            
+            // Gamma correction (gamma = 2.0)
+            double r = std::sqrt(c.x);
+            double g = std::sqrt(c.y);
+            double b = std::sqrt(c.z);
+            
+            // Clamp and convert to 0-255
+            int ir = static_cast<int>(256 * std::clamp(r, 0.0, 0.999));
+            int ig = static_cast<int>(256 * std::clamp(g, 0.0, 0.999));
+            int ib = static_cast<int>(256 * std::clamp(b, 0.0, 0.999));
+            
+            // stb expects top-to-bottom, so flip Y
+            int out_y = height - 1 - y;
+            int idx = (out_y * width + x) * 3;
+            data[idx + 0] = static_cast<unsigned char>(ir);
+            data[idx + 1] = static_cast<unsigned char>(ig);
+            data[idx + 2] = static_cast<unsigned char>(ib);
+        }
+    }
+    
+    return stbi_write_png(filename.c_str(), width, height, 3, data.data(), width * 3) != 0;
 }
 
 Image Renderer::render(const Scene& scene, const Camera& camera) const {
