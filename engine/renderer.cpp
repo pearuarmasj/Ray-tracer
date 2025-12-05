@@ -173,6 +173,9 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
     if (scene.hit(r, 0.001, 1e9, rec)) {
         const Material& mat = scene.get_material(rec.material_id);
         
+        // Get color from texture or albedo
+        color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
+        
         switch (mat.type) {
             case MaterialType::Lambertian: {
                 // Calculate direct lighting from all lights
@@ -196,7 +199,7 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 
                 // Combine direct + indirect lighting
                 color total_light = vec3_add(direct_light, indirect);
-                return vec3_mul(mat.albedo, total_light);
+                return vec3_mul(surface_color, total_light);
             }
             
             case MaterialType::Metal: {
@@ -206,8 +209,7 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 
                 // Only reflect if reflected ray goes away from surface
                 if (vec3_dot(scattered.direction, rec.normal) > 0) {
-                    color attenuation = mat.albedo;
-                    return vec3_mul(attenuation, ray_color(scattered, scene, depth - 1));
+                    return vec3_mul(surface_color, ray_color(scattered, scene, depth - 1));
                 }
                 return vec3_zero();
             }

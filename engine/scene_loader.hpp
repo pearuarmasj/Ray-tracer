@@ -8,6 +8,7 @@
 #include "json.hpp"
 #include "scene.hpp"
 #include "material.hpp"
+#include "texture.hpp"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -41,6 +42,25 @@ public:
     };
     
     /**
+     * @brief Parse a texture from JSON
+     */
+    static Texture parse_texture(const json& tex) {
+        std::string type = tex.value("type", "solid");
+        
+        if (type == "checker") {
+            auto c1 = tex.value("color1", std::vector<double>{1.0, 1.0, 1.0});
+            auto c2 = tex.value("color2", std::vector<double>{0.0, 0.0, 0.0});
+            double scale = tex.value("scale", 10.0);
+            return Texture::checker({c1[0], c1[1], c1[2]}, {c2[0], c2[1], c2[2]}, scale);
+        }
+        else {
+            // Solid color
+            auto c = tex.value("color", std::vector<double>{0.5, 0.5, 0.5});
+            return Texture::solid({c[0], c[1], c[2]});
+        }
+    }
+    
+    /**
      * @brief Load scene from JSON file
      * @param filename Path to JSON file
      * @return SceneData with scene and settings, or empty on failure
@@ -71,14 +91,25 @@ public:
                 Material m;
                 std::string type = mat.value("type", "lambertian");
                 
+                // Check for texture
+                bool has_texture = mat.contains("texture");
+                
                 if (type == "lambertian") {
-                    auto c = mat.value("color", std::vector<double>{0.5, 0.5, 0.5});
-                    m = Material::lambertian({c[0], c[1], c[2]});
+                    if (has_texture) {
+                        m = Material::lambertian_textured(parse_texture(mat["texture"]));
+                    } else {
+                        auto c = mat.value("color", std::vector<double>{0.5, 0.5, 0.5});
+                        m = Material::lambertian({c[0], c[1], c[2]});
+                    }
                 }
                 else if (type == "metal") {
-                    auto c = mat.value("color", std::vector<double>{0.8, 0.8, 0.8});
                     double fuzz = mat.value("fuzz", 0.0);
-                    m = Material::metal({c[0], c[1], c[2]}, fuzz);
+                    if (has_texture) {
+                        m = Material::metal_textured(parse_texture(mat["texture"]), fuzz);
+                    } else {
+                        auto c = mat.value("color", std::vector<double>{0.8, 0.8, 0.8});
+                        m = Material::metal({c[0], c[1], c[2]}, fuzz);
+                    }
                 }
                 else if (type == "dielectric" || type == "glass") {
                     double ior = mat.value("ior", 1.5);

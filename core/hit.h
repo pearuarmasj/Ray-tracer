@@ -21,6 +21,8 @@ typedef struct hit_record {
     point3 point;      /**< Point of intersection */
     vec3 normal;       /**< Surface normal at intersection */
     double t;          /**< Ray parameter at intersection */
+    double u;          /**< Texture U coordinate */
+    double v;          /**< Texture V coordinate */
     bool front_face;   /**< True if ray hit front face */
     int material_id;   /**< Material identifier for the hit surface */
 } hit_record;

@@ -9,6 +9,7 @@
 #include "scene.hpp"
 #include "scene_loader.hpp"
 #include "material.hpp"
+#include "texture.hpp"
 
 #include <iostream>
 #include <string>
@@ -21,7 +22,10 @@ using namespace raytracer;
 Scene create_demo_scene() {
     Scene scene;
     
-    int mat_ground = scene.add_material(Material::lambertian({0.3, 0.3, 0.3}));
+    // Checker pattern ground
+    int mat_ground = scene.add_material(Material::lambertian_textured(
+        Texture::checker({0.9, 0.9, 0.9}, {0.2, 0.2, 0.2}, 1.0)
+    ));
     int mat_center = scene.add_material(Material::lambertian({0.1, 0.2, 0.5}));
     int mat_left = scene.add_material(Material::dielectric(1.5));
     int mat_right = scene.add_material(Material::metal({0.8, 0.6, 0.2}, 0.0));

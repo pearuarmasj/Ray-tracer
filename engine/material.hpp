@@ -11,6 +11,7 @@ extern "C" {
 #include "../core/hit.h"
 }
 
+#include "texture.hpp"
 #include <cmath>
 
 namespace raytracer {
@@ -29,29 +30,78 @@ enum class MaterialType {
  */
 struct Material {
     MaterialType type = MaterialType::Lambertian;
-    color albedo = {0.5, 0.5, 0.5};  // Base color
+    color albedo = {0.5, 0.5, 0.5};  // Base color (used if no texture)
+    Texture texture;                  // Texture for the material
+    bool has_texture = false;         // Whether to use texture instead of albedo
     double fuzz = 0.0;                // Metal roughness (0 = mirror)
     double refraction_index = 1.5;    // Index of refraction for dielectrics
+    
+    /**
+     * @brief Get the color at a given point
+     */
+    color get_albedo(point3 p, double u = 0.0, double v = 0.0) const {
+        if (has_texture) {
+            return texture.sample(p, u, v);
+        }
+        return albedo;
+    }
     
     /**
      * @brief Create a Lambertian (diffuse) material
      */
     static Material lambertian(color c) {
-        return Material{MaterialType::Lambertian, c, 0.0, 1.5};
+        Material m;
+        m.type = MaterialType::Lambertian;
+        m.albedo = c;
+        m.has_texture = false;
+        return m;
+    }
+    
+    /**
+     * @brief Create a Lambertian material with a texture
+     */
+    static Material lambertian_textured(Texture tex) {
+        Material m;
+        m.type = MaterialType::Lambertian;
+        m.texture = tex;
+        m.has_texture = true;
+        return m;
     }
     
     /**
      * @brief Create a metal (reflective) material
      */
     static Material metal(color c, double fuzz_factor = 0.0) {
-        return Material{MaterialType::Metal, c, fuzz_factor < 1.0 ? fuzz_factor : 1.0, 1.5};
+        Material m;
+        m.type = MaterialType::Metal;
+        m.albedo = c;
+        m.fuzz = fuzz_factor < 1.0 ? fuzz_factor : 1.0;
+        m.has_texture = false;
+        return m;
+    }
+    
+    /**
+     * @brief Create a metal material with a texture
+     */
+    static Material metal_textured(Texture tex, double fuzz_factor = 0.0) {
+        Material m;
+        m.type = MaterialType::Metal;
+        m.texture = tex;
+        m.fuzz = fuzz_factor < 1.0 ? fuzz_factor : 1.0;
+        m.has_texture = true;
+        return m;
     }
     
     /**
      * @brief Create a dielectric (glass-like) material
      */
     static Material dielectric(double ir) {
-        return Material{MaterialType::Dielectric, {1.0, 1.0, 1.0}, 0.0, ir};
+        Material m;
+        m.type = MaterialType::Dielectric;
+        m.albedo = {1.0, 1.0, 1.0};
+        m.refraction_index = ir;
+        m.has_texture = false;
+        return m;
     }
     
     /**

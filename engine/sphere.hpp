@@ -15,6 +15,22 @@ extern "C" {
 
 namespace raytracer {
 
+constexpr double PI = 3.14159265358979323846;
+
+/**
+ * @brief Calculate UV coordinates for a point on a unit sphere
+ * @param p Point on unit sphere (normalized direction from center)
+ * @param u Output U coordinate [0, 1]
+ * @param v Output V coordinate [0, 1]
+ */
+inline void get_sphere_uv(const vec3& p, double& u, double& v) {
+    double theta = std::acos(-p.y);
+    double phi = std::atan2(-p.z, p.x) + PI;
+    
+    u = phi / (2.0 * PI);
+    v = theta / PI;
+}
+
 /**
  * @brief Sphere primitive
  */
@@ -62,6 +78,9 @@ struct Sphere {
         vec3 outward_normal = vec3_scale(vec3_sub(rec.point, center), 1.0 / radius);
         hit_record_set_face_normal(&rec, r, outward_normal);
         rec.material_id = material_id;
+        
+        // Calculate UV coordinates
+        get_sphere_uv(outward_normal, rec.u, rec.v);
         
         return true;
     }
