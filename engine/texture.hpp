@@ -36,6 +36,154 @@ enum class TextureType {
 };
 
 /**
+ * @brief Normal map for perturbing surface normals
+ * 
+ * Stores normal map data in tangent space. The RGB values are mapped:
+ * R -> X (tangent), G -> Y (bitangent), B -> Z (normal)
+ * Values are stored as [0, 255] and converted to [-1, 1] when sampled.
+ */
+struct NormalMap {
+    std::shared_ptr<std::vector<unsigned char>> data;
+    int width = 0;
+    int height = 0;
+    double strength = 1.0;  // Normal map intensity (0 = no effect, 1 = full)
+    
+    bool valid() const {
+        return data && width > 0 && height > 0;
+    }
+    
+    /**
+     * @brief Load a normal map from file
+     */
+    static NormalMap load(const std::string& filename, double strength = 1.0) {
+        NormalMap nmap;
+        int channels;
+        unsigned char* raw = stbi_load(filename.c_str(), &nmap.width, &nmap.height, &channels, 3);
+        
+        if (!raw) {
+            std::cerr << "Error: Could not load normal map: " << filename << std::endl;
+            return nmap;
+        }
+        
+        nmap.data = std::make_shared<std::vector<unsigned char>>(
+            raw, raw + nmap.width * nmap.height * 3
+        );
+        nmap.strength = strength;
+        stbi_image_free(raw);
+        
+        std::cout << "Loaded normal map: " << filename 
+                  << " (" << nmap.width << "x" << nmap.height << ")" << std::endl;
+        return nmap;
+    }
+    
+    /**
+     * @brief Sample the normal map at UV coordinates
+     * @return Tangent-space normal (Z points outward)
+     */
+    vec3 sample(double u, double v) const {
+        if (!valid()) {
+            return {0.0, 0.0, 1.0};  // Default: unperturbed normal
+        }
+        
+        // Clamp UV
+        u = std::clamp(u, 0.0, 1.0);
+        v = 1.0 - std::clamp(v, 0.0, 1.0);  // Flip V
+        
+        int i = std::min(static_cast<int>(u * width), width - 1);
+        int j = std::min(static_cast<int>(v * height), height - 1);
+        int idx = (j * width + i) * 3;
+        
+        // Convert from [0, 255] to [-1, 1]
+        double nx = ((*data)[idx + 0] / 255.0) * 2.0 - 1.0;
+        double ny = ((*data)[idx + 1] / 255.0) * 2.0 - 1.0;
+        double nz = ((*data)[idx + 2] / 255.0) * 2.0 - 1.0;
+        
+        // Apply strength (lerp toward unperturbed normal)
+        if (strength < 1.0) {
+            nx = nx * strength;
+            ny = ny * strength;
+            nz = nz * strength + (1.0 - strength);
+        }
+        
+        return vec3_normalize({nx, ny, nz});
+    }
+    
+    /**
+     * @brief Transform tangent-space normal to world space
+     * @param tangent_normal Normal from sample()
+     * @param normal Geometric surface normal (world space)
+     * @param tangent Surface tangent (world space)
+     * @param bitangent Surface bitangent (world space)
+     * @return Perturbed normal in world space
+     */
+    static vec3 tangent_to_world(vec3 tangent_normal, vec3 normal, vec3 tangent, vec3 bitangent) {
+        // TBN matrix transforms tangent space to world space
+        return vec3_normalize({
+            tangent.x * tangent_normal.x + bitangent.x * tangent_normal.y + normal.x * tangent_normal.z,
+            tangent.y * tangent_normal.x + bitangent.y * tangent_normal.y + normal.y * tangent_normal.z,
+            tangent.z * tangent_normal.x + bitangent.z * tangent_normal.y + normal.z * tangent_normal.z
+        });
+    }
+};
+
+/**
+ * @brief Roughness map for spatially-varying roughness
+ * 
+ * Single-channel texture that modulates material roughness.
+ * White (255) = rough, Black (0) = smooth/mirror.
+ */
+struct RoughnessMap {
+    std::shared_ptr<std::vector<unsigned char>> data;
+    int width = 0;
+    int height = 0;
+    
+    bool valid() const {
+        return data && width > 0 && height > 0;
+    }
+    
+    /**
+     * @brief Load a roughness map from file
+     */
+    static RoughnessMap load(const std::string& filename) {
+        RoughnessMap rmap;
+        int channels;
+        unsigned char* raw = stbi_load(filename.c_str(), &rmap.width, &rmap.height, &channels, 1);
+        
+        if (!raw) {
+            std::cerr << "Error: Could not load roughness map: " << filename << std::endl;
+            return rmap;
+        }
+        
+        rmap.data = std::make_shared<std::vector<unsigned char>>(
+            raw, raw + rmap.width * rmap.height
+        );
+        stbi_image_free(raw);
+        
+        std::cout << "Loaded roughness map: " << filename 
+                  << " (" << rmap.width << "x" << rmap.height << ")" << std::endl;
+        return rmap;
+    }
+    
+    /**
+     * @brief Sample roughness at UV coordinates
+     * @return Roughness value [0, 1]
+     */
+    double sample(double u, double v) const {
+        if (!valid()) {
+            return 0.5;  // Default mid roughness
+        }
+        
+        u = std::clamp(u, 0.0, 1.0);
+        v = 1.0 - std::clamp(v, 0.0, 1.0);
+        
+        int i = std::min(static_cast<int>(u * width), width - 1);
+        int j = std::min(static_cast<int>(v * height), height - 1);
+        
+        return (*data)[j * width + i] / 255.0;
+    }
+};
+
+/**
  * @brief Texture class supporting solid, checker, and image textures
  */
 struct Texture {

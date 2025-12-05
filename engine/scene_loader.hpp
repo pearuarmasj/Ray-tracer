@@ -41,6 +41,8 @@ public:
         RenderMode mode = RenderMode::Whitted;
         bool use_nee = true;
         bool use_mis = true;
+        ToneMapper tone_mapper = ToneMapper::ACES;
+        double exposure = 1.0;
         
         std::string output_file = "output.png";
     };
@@ -137,6 +139,23 @@ public:
                     );
                 }
                 
+                // Check for normal map
+                if (mat.contains("normal_map")) {
+                    std::string nmap_file = mat["normal_map"].value("file", "");
+                    double strength = mat["normal_map"].value("strength", 1.0);
+                    if (!nmap_file.empty()) {
+                        m.with_normal_map(NormalMap::load(nmap_file, strength));
+                    }
+                }
+                
+                // Check for roughness map
+                if (mat.contains("roughness_map")) {
+                    std::string rmap_file = mat["roughness_map"].value("file", "");
+                    if (!rmap_file.empty()) {
+                        m.with_roughness_map(RoughnessMap::load(rmap_file));
+                    }
+                }
+                
                 int id = data.scene.add_material(m);
                 material_ids[name] = id;
             }
@@ -195,14 +214,64 @@ public:
             }
         }
         
-        // Load lights
+        // Load lights (point, quad, disk)
         if (j.contains("lights")) {
             for (auto& light : j["lights"]) {
-                auto pos = light.value("position", std::vector<double>{0, 5, 0});
+                std::string type = light.value("type", "point");
                 auto col = light.value("color", std::vector<double>{1, 1, 1});
                 double intensity = light.value("intensity", 1.0);
-                data.scene.add_light({pos[0], pos[1], pos[2]}, 
-                                    {col[0] * intensity, col[1] * intensity, col[2] * intensity});
+                color emission = {col[0] * intensity, col[1] * intensity, col[2] * intensity};
+                
+                if (type == "point") {
+                    auto pos = light.value("position", std::vector<double>{0, 5, 0});
+                    data.scene.add_light({pos[0], pos[1], pos[2]}, emission);
+                }
+                else if (type == "quad" || type == "rect" || type == "rectangle") {
+                    // Quad light: can be defined by corner + edges, or center + size
+                    if (light.contains("corner") && light.contains("edge_u") && light.contains("edge_v")) {
+                        // Corner-based definition
+                        auto corner = light["corner"].get<std::vector<double>>();
+                        auto u = light["edge_u"].get<std::vector<double>>();
+                        auto v = light["edge_v"].get<std::vector<double>>();
+                        data.scene.add_quad_light(
+                            {corner[0], corner[1], corner[2]},
+                            {u[0], u[1], u[2]},
+                            {v[0], v[1], v[2]},
+                            emission
+                        );
+                    } else {
+                        // Center-based definition (easier for users)
+                        auto pos = light.value("position", std::vector<double>{0, 3, 0});
+                        double width = light.value("width", 1.0);
+                        double height = light.value("height", 1.0);
+                        auto normal = light.value("normal", std::vector<double>{0, -1, 0});
+                        
+                        // Build local coordinate frame from normal
+                        vec3 n = vec3_normalize({normal[0], normal[1], normal[2]});
+                        vec3 up = (std::fabs(n.y) < 0.999) ? vec3{0, 1, 0} : vec3{1, 0, 0};
+                        vec3 u_dir = vec3_normalize(vec3_cross(up, n));
+                        vec3 v_dir = vec3_cross(n, u_dir);
+                        
+                        data.scene.add_quad_light_centered(
+                            {pos[0], pos[1], pos[2]},
+                            u_dir, v_dir,
+                            width, height,
+                            emission
+                        );
+                    }
+                }
+                else if (type == "disk" || type == "disc") {
+                    auto pos = light.value("position", std::vector<double>{0, 3, 0});
+                    double radius = light.value("radius", 0.5);
+                    auto normal = light.value("normal", std::vector<double>{0, -1, 0});
+                    
+                    data.scene.add_disk_light(
+                        {pos[0], pos[1], pos[2]},
+                        {normal[0], normal[1], normal[2]},
+                        radius,
+                        emission
+                    );
+                }
             }
         }
         
@@ -234,6 +303,7 @@ public:
             data.output_file = r.value("output", "output.png");
             data.use_nee = r.value("nee", true);
             data.use_mis = r.value("mis", true);
+            data.exposure = r.value("exposure", 1.0);
             
             // Parse render mode
             std::string mode_str = r.value("mode", "whitted");
@@ -242,6 +312,13 @@ public:
             } else {
                 data.mode = RenderMode::Whitted;
             }
+            
+            // Parse tone mapper
+            std::string tm_str = r.value("tonemapper", "aces");
+            if (tm_str == "none") data.tone_mapper = ToneMapper::None;
+            else if (tm_str == "reinhard") data.tone_mapper = ToneMapper::Reinhard;
+            else if (tm_str == "uncharted2") data.tone_mapper = ToneMapper::Uncharted2;
+            else data.tone_mapper = ToneMapper::ACES;
         }
         
         // Load environment map (HDR sky lighting)
@@ -267,7 +344,9 @@ public:
                   << data.scene.planes.size() << " planes, "
                   << data.scene.boxes.size() << " boxes, "
                   << data.scene.triangles.size() << " triangles, "
-                  << data.scene.lights.size() << " lights";
+                  << data.scene.lights.size() << " point lights, "
+                  << data.scene.quad_lights.size() << " quad lights, "
+                  << data.scene.disk_lights.size() << " disk lights";
         if (data.scene.environment) {
             std::cout << ", environment map";
         }

@@ -9,7 +9,10 @@ hit_record hit_record_init(void) {
     hit_record rec;
     rec.point = vec3_zero();
     rec.normal = vec3_zero();
+    rec.tangent = (vec3){1.0, 0.0, 0.0};  // Default tangent along X-axis
     rec.t = 0.0;
+    rec.u = 0.0;
+    rec.v = 0.0;
     rec.front_face = true;
     rec.material_id = 0;
     return rec;

@@ -54,6 +54,141 @@ vec3 random_on_hemisphere(vec3 normal) {
         return vec3_negate(on_unit_sphere);
 }
 
+/**
+ * @brief Apply normal map perturbation to hit record
+ * 
+ * Modifies rec.normal in-place if the material has a normal map.
+ */
+inline void apply_normal_map(hit_record& rec, const Material& mat) {
+    if (!mat.has_normal_map) {
+        return;
+    }
+    
+    // Sample the normal map (returns tangent-space normal)
+    vec3 tangent_normal = mat.normal_map.sample(rec.u, rec.v);
+    
+    // Build TBN (Tangent, Bitangent, Normal) matrix
+    vec3 N = rec.normal;
+    vec3 T = rec.tangent;
+    
+    // Ensure tangent is orthogonal to normal (Gram-Schmidt)
+    T = vec3_normalize(vec3_sub(T, vec3_scale(N, vec3_dot(N, T))));
+    vec3 B = vec3_cross(N, T);
+    
+    // Transform tangent-space normal to world space
+    rec.normal = vec3_normalize({
+        T.x * tangent_normal.x + B.x * tangent_normal.y + N.x * tangent_normal.z,
+        T.y * tangent_normal.x + B.y * tangent_normal.y + N.y * tangent_normal.z,
+        T.z * tangent_normal.x + B.z * tangent_normal.y + N.z * tangent_normal.z
+    });
+}
+
+// ==================== Tone Mapping Operators ====================
+
+/**
+ * @brief Simple Reinhard tone mapping
+ * Maps [0, inf) to [0, 1)
+ */
+inline double reinhard(double x) {
+    return x / (1.0 + x);
+}
+
+/**
+ * @brief Extended Reinhard with white point
+ * Allows white_point values to map to 1.0
+ */
+inline double reinhard_extended(double x, double white_point) {
+    double wp2 = white_point * white_point;
+    return x * (1.0 + x / wp2) / (1.0 + x);
+}
+
+/**
+ * @brief ACES Filmic approximation (by Krzysztof Narkowicz)
+ * Popular film-like tone curve
+ */
+inline double aces_filmic(double x) {
+    double a = 2.51;
+    double b = 0.03;
+    double c = 2.43;
+    double d = 0.59;
+    double e = 0.14;
+    return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+/**
+ * @brief Uncharted 2 tone mapping helper
+ */
+inline double uncharted2_partial(double x) {
+    double A = 0.15;
+    double B = 0.50;
+    double C = 0.10;
+    double D = 0.20;
+    double E = 0.02;
+    double F = 0.30;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+/**
+ * @brief Uncharted 2 filmic tone mapping
+ */
+inline double uncharted2(double x) {
+    double exposure_bias = 2.0;
+    double white = 11.2;
+    double curr = uncharted2_partial(x * exposure_bias);
+    double white_scale = 1.0 / uncharted2_partial(white);
+    return curr * white_scale;
+}
+
+/**
+ * @brief Apply tone mapping to a single color
+ */
+color apply_tone_mapper(color c, ToneMapper mapper) {
+    switch (mapper) {
+        case ToneMapper::Reinhard:
+            return {reinhard(c.x), reinhard(c.y), reinhard(c.z)};
+        
+        case ToneMapper::ReinhardExtended: {
+            double white = 4.0;  // Adjust as needed
+            return {
+                reinhard_extended(c.x, white),
+                reinhard_extended(c.y, white),
+                reinhard_extended(c.z, white)
+            };
+        }
+        
+        case ToneMapper::ACES:
+            return {aces_filmic(c.x), aces_filmic(c.y), aces_filmic(c.z)};
+        
+        case ToneMapper::Uncharted2:
+            return {uncharted2(c.x), uncharted2(c.y), uncharted2(c.z)};
+        
+        case ToneMapper::None:
+        default:
+            // Just clamp to [0, 1]
+            return {
+                std::clamp(c.x, 0.0, 1.0),
+                std::clamp(c.y, 0.0, 1.0),
+                std::clamp(c.z, 0.0, 1.0)
+            };
+    }
+}
+
+void Image::apply_tone_mapping(ToneMapper mapper, double exposure) {
+    for (int i = 0; i < width * height; ++i) {
+        // Apply exposure
+        color c = {
+            pixels[i].x * exposure,
+            pixels[i].y * exposure,
+            pixels[i].z * exposure
+        };
+        
+        // Apply tone mapping
+        pixels[i] = apply_tone_mapper(c, mapper);
+    }
+}
+
+// ==================== Image Output ====================
+
 bool Image::write_ppm(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
@@ -67,14 +202,15 @@ bool Image::write_ppm(const std::string& filename) const {
             color c = get_pixel(x, y);
             
             // Gamma correction (gamma = 2.0)
-            double r = std::sqrt(c.x);
-            double g = std::sqrt(c.y);
-            double b = std::sqrt(c.z);
+            // Tone mapping already puts values in [0,1] range
+            double r = std::sqrt(std::clamp(c.x, 0.0, 1.0));
+            double g = std::sqrt(std::clamp(c.y, 0.0, 1.0));
+            double b = std::sqrt(std::clamp(c.z, 0.0, 1.0));
             
-            // Clamp and convert to 0-255
-            int ir = static_cast<int>(256 * std::clamp(r, 0.0, 0.999));
-            int ig = static_cast<int>(256 * std::clamp(g, 0.0, 0.999));
-            int ib = static_cast<int>(256 * std::clamp(b, 0.0, 0.999));
+            // Convert to 0-255
+            int ir = static_cast<int>(255.999 * r);
+            int ig = static_cast<int>(255.999 * g);
+            int ib = static_cast<int>(255.999 * b);
             
             file << ir << ' ' << ig << ' ' << ib << '\n';
         }
@@ -92,14 +228,15 @@ bool Image::write_png(const std::string& filename) const {
             color c = get_pixel(x, y);
             
             // Gamma correction (gamma = 2.0)
-            double r = std::sqrt(c.x);
-            double g = std::sqrt(c.y);
-            double b = std::sqrt(c.z);
+            // Tone mapping already puts values in [0,1] range
+            double r = std::sqrt(std::clamp(c.x, 0.0, 1.0));
+            double g = std::sqrt(std::clamp(c.y, 0.0, 1.0));
+            double b = std::sqrt(std::clamp(c.z, 0.0, 1.0));
             
-            // Clamp and convert to 0-255
-            int ir = static_cast<int>(256 * std::clamp(r, 0.0, 0.999));
-            int ig = static_cast<int>(256 * std::clamp(g, 0.0, 0.999));
-            int ib = static_cast<int>(256 * std::clamp(b, 0.0, 0.999));
+            // Convert to 0-255
+            int ir = static_cast<int>(255.999 * r);
+            int ig = static_cast<int>(255.999 * g);
+            int ib = static_cast<int>(255.999 * b);
             
             // stb expects top-to-bottom, so flip Y
             int out_y = height - 1 - y;
@@ -172,7 +309,10 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         }
     }
     
-    std::cout << "\nDone!" << std::endl;
+    std::cout << "\nApplying tone mapping..." << std::flush;
+    image.apply_tone_mapping(settings_.tone_mapper, settings_.exposure);
+    
+    std::cout << " Done!" << std::endl;
     return image;
 }
 
@@ -187,6 +327,9 @@ color Renderer::ray_color_whitted(ray r, const Scene& scene, int depth) const {
     // Check for intersection (t_min = 0.001 to avoid shadow acne)
     if (scene.hit(r, 0.001, 1e9, rec)) {
         const Material& mat = scene.get_material(rec.material_id);
+        
+        // Apply normal map if present
+        apply_normal_map(rec, mat);
         
         // Get color from texture or albedo
         color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
@@ -276,6 +419,7 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
     ray current_ray = r;
     bool specular_bounce = false;
     bool was_diffuse_bounce = false;  // Track if last bounce was diffuse (for env MIS)
+    double bsdf_pdf = 0.0;  // Track BSDF PDF from previous bounce for MIS
     
     for (int bounce = 0; bounce < depth; ++bounce) {
         hit_record rec;
@@ -297,7 +441,35 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
             break;
         }
         
+        // Check if we hit an area light
+        if (scene.is_area_light(rec.material_id)) {
+            color light_emission = scene.get_area_light_emission(rec.material_id);
+            
+            // Add emission on first hit, after specular bounce, or when NEE is disabled
+            // When NEE+MIS is enabled on diffuse bounce, need MIS weight
+            if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+                accumulated = vec3_add(accumulated, vec3_mul(throughput, light_emission));
+            } else if (settings_.use_mis && was_diffuse_bounce && bsdf_pdf > 0) {
+                // MIS weight for BSDF sampling hitting area light
+                double hit_dist = rec.t;
+                double cos_light = std::abs(vec3_dot(rec.normal, vec3_negate(vec3_normalize(current_ray.direction))));
+                double light_pdf_area = scene.light_pdf(vec3_zero(), rec.point);  // from_point not used for area lights
+                
+                if (light_pdf_area > 0 && cos_light > 0) {
+                    double light_pdf_sa = light_pdf_area * hit_dist * hit_dist / cos_light;
+                    double mis_w = power_heuristic(bsdf_pdf, light_pdf_sa);
+                    accumulated = vec3_add(accumulated, 
+                        vec3_scale(vec3_mul(throughput, light_emission), mis_w));
+                }
+            }
+            break;  // Area lights don't scatter
+        }
+        
         const Material& mat = scene.get_material(rec.material_id);
+        
+        // Apply normal map if present
+        apply_normal_map(rec, mat);
+        
         color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
         
         // Add emission on first hit, after specular bounce, or when NEE is disabled
@@ -310,7 +482,7 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
         color attenuation = surface_color;
         specular_bounce = false;
         was_diffuse_bounce = false;
-        double bsdf_pdf = 0.0;  // For MIS
+        bsdf_pdf = 0.0;  // Reset for MIS
         
         switch (mat.type) {
             case MaterialType::Lambertian: {

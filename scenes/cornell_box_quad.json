@@ -1,0 +1,102 @@
+{
+    "materials": {
+        "white": {
+            "type": "lambertian",
+            "color": [0.73, 0.73, 0.73]
+        },
+        "red": {
+            "type": "lambertian",
+            "color": [0.65, 0.05, 0.05]
+        },
+        "green": {
+            "type": "lambertian",
+            "color": [0.12, 0.45, 0.15]
+        },
+        "glass": {
+            "type": "glass",
+            "ior": 1.5
+        },
+        "mirror": {
+            "type": "metal",
+            "color": [0.95, 0.95, 0.95],
+            "fuzz": 0.0
+        }
+    },
+    "objects": [
+        {
+            "type": "plane",
+            "position": [0, 0, 0],
+            "normal": [0, 1, 0],
+            "material": "white",
+            "comment": "floor"
+        },
+        {
+            "type": "plane",
+            "position": [0, 5, 0],
+            "normal": [0, -1, 0],
+            "material": "white",
+            "comment": "ceiling"
+        },
+        {
+            "type": "plane",
+            "position": [0, 0, -5],
+            "normal": [0, 0, 1],
+            "material": "white",
+            "comment": "back wall"
+        },
+        {
+            "type": "plane",
+            "position": [-2.5, 0, 0],
+            "normal": [1, 0, 0],
+            "material": "red",
+            "comment": "left wall"
+        },
+        {
+            "type": "plane",
+            "position": [2.5, 0, 0],
+            "normal": [-1, 0, 0],
+            "material": "green",
+            "comment": "right wall"
+        },
+        {
+            "type": "sphere",
+            "position": [-1.0, 0.8, -2.5],
+            "radius": 0.8,
+            "material": "glass"
+        },
+        {
+            "type": "sphere",
+            "position": [1.0, 0.6, -3.0],
+            "radius": 0.6,
+            "material": "mirror"
+        }
+    ],
+    "lights": [
+        {
+            "type": "quad",
+            "comment": "Ceiling area light",
+            "position": [0, 4.99, -2.5],
+            "normal": [0, -1, 0],
+            "width": 1.5,
+            "height": 1.5,
+            "color": [1.0, 0.95, 0.9],
+            "intensity": 15.0
+        }
+    ],
+    "camera": {
+        "position": [0, 2.5, 2],
+        "target": [0, 2.5, -2.5],
+        "up": [0, 1, 0],
+        "fov": 60
+    },
+    "render": {
+        "width": 800,
+        "height": 800,
+        "samples": 128,
+        "max_depth": 50,
+        "mode": "pathtrace",
+        "nee": true,
+        "mis": true,
+        "output": "cornell_box_quad.png"
+    }
+}

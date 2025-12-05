@@ -32,6 +32,24 @@ inline void get_sphere_uv(const vec3& p, double& u, double& v) {
 }
 
 /**
+ * @brief Calculate tangent vector for a point on a unit sphere
+ * @param p Point on unit sphere (normalized direction from center)
+ * @return Tangent vector in direction of increasing U (longitude)
+ */
+inline vec3 get_sphere_tangent(const vec3& p) {
+    // Tangent is perpendicular to normal (p) and points in direction of increasing phi
+    // For spherical coordinates: tangent = d(point)/d(phi) = (-sin(phi), 0, cos(phi))
+    // But we work with the normal p = (x, y, z) where x = sin(theta)*cos(phi), z = -sin(theta)*sin(phi)
+    // The tangent in phi direction is proportional to (-z, 0, x) = cross(p, (0,1,0)) normalized
+    // Handle pole case where p is nearly parallel to Y axis
+    if (std::fabs(p.y) > 0.999) {
+        return {1.0, 0.0, 0.0};  // At poles, pick arbitrary tangent
+    }
+    vec3 tangent = {-p.z, 0.0, p.x};  // Cross product of p with Y-up
+    return vec3_normalize(tangent);
+}
+
+/**
  * @brief Sphere primitive
  */
 struct Sphere {
@@ -79,8 +97,9 @@ struct Sphere {
         hit_record_set_face_normal(&rec, r, outward_normal);
         rec.material_id = material_id;
         
-        // Calculate UV coordinates
+        // Calculate UV coordinates and tangent
         get_sphere_uv(outward_normal, rec.u, rec.v);
+        rec.tangent = get_sphere_tangent(outward_normal);
         
         return true;
     }

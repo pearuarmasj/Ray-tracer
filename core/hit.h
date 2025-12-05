@@ -20,6 +20,7 @@ extern "C" {
 typedef struct hit_record {
     point3 point;      /**< Point of intersection */
     vec3 normal;       /**< Surface normal at intersection */
+    vec3 tangent;      /**< Surface tangent at intersection (for normal mapping) */
     double t;          /**< Ray parameter at intersection */
     double u;          /**< Texture U coordinate */
     double v;          /**< Texture V coordinate */

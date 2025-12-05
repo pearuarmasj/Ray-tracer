@@ -28,6 +28,17 @@ enum class RenderMode {
 };
 
 /**
+ * @brief Tone mapping operators
+ */
+enum class ToneMapper {
+    None,       // No tone mapping (just gamma correction)
+    Reinhard,   // Simple Reinhard (L / (1 + L))
+    ReinhardExtended,  // Extended Reinhard with white point
+    ACES,       // ACES Filmic approximation
+    Uncharted2  // Uncharted 2 filmic curve
+};
+
+/**
  * @brief Image buffer for rendering
  */
 struct Image {
@@ -50,6 +61,13 @@ struct Image {
     color get_pixel(int x, int y) const {
         return pixels[y * width + x];
     }
+    
+    /**
+     * @brief Apply tone mapping and exposure to all pixels (in-place)
+     * @param mapper Tone mapping operator to use
+     * @param exposure Exposure multiplier (applied before tone mapping)
+     */
+    void apply_tone_mapping(ToneMapper mapper, double exposure = 1.0);
     
     /**
      * @brief Write image to PPM file
@@ -84,6 +102,8 @@ public:
         RenderMode mode = RenderMode::Whitted;     // Rendering algorithm
         bool use_nee = true;         // Next Event Estimation (direct light sampling)
         bool use_mis = true;         // Multiple Importance Sampling
+        ToneMapper tone_mapper = ToneMapper::ACES;  // Tone mapping operator
+        double exposure = 1.0;       // Exposure adjustment (multiplier before tone mapping)
     };
     
     Renderer() = default;

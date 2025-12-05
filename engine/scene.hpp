@@ -126,6 +126,10 @@ public:
     std::vector<Material> materials;
     std::vector<PointLight> lights;
     
+    // Area lights
+    std::vector<QuadLight> quad_lights;
+    std::vector<DiskLight> disk_lights;
+    
     // Environment map for HDR sky lighting (optional)
     std::shared_ptr<EnvironmentMap> environment;
     
@@ -191,6 +195,28 @@ public:
     }
     
     /**
+     * @brief Add a quad area light to the scene
+     */
+    void add_quad_light(point3 corner, vec3 edge_u, vec3 edge_v, color emission, int material_id = -1) {
+        quad_lights.emplace_back(corner, edge_u, edge_v, emission, material_id);
+    }
+    
+    /**
+     * @brief Add a centered quad area light
+     */
+    void add_quad_light_centered(point3 center, vec3 u_dir, vec3 v_dir, 
+                                  double width, double height, color emission, int material_id = -1) {
+        quad_lights.push_back(QuadLight::centered(center, u_dir, v_dir, width, height, emission, material_id));
+    }
+    
+    /**
+     * @brief Add a disk area light to the scene
+     */
+    void add_disk_light(point3 center, vec3 normal, double radius, color emission, int material_id = -1) {
+        disk_lights.emplace_back(center, normal, radius, emission, material_id);
+    }
+    
+    /**
      * @brief Get list of emissive sphere indices for NEE
      */
     std::vector<size_t> get_emissive_spheres() const {
@@ -247,7 +273,7 @@ public:
     }
     
     /**
-     * @brief Sample a light source (emissive geometry, point light, or environment)
+     * @brief Sample a light source (emissive geometry, point light, area lights, or environment)
      * @param from_point Surface point to sample from
      * @return LightSample, or invalid if no lights
      */
@@ -257,21 +283,23 @@ public:
         
         // Collect all light sources
         auto emissive_spheres = get_emissive_spheres();
-        size_t total_lights = lights.size() + emissive_spheres.size();
+        size_t num_point_lights = lights.size();
+        size_t num_emissive_spheres = emissive_spheres.size();
+        size_t num_quad_lights = quad_lights.size();
+        size_t num_disk_lights = disk_lights.size();
+        size_t total_geo_lights = num_point_lights + num_emissive_spheres + num_quad_lights + num_disk_lights;
         
         // Check if environment map is available for sampling
         bool has_env = environment && environment->has_importance_sampling();
-        size_t env_weight = has_env ? 1 : 0;
-        size_t total_sources = total_lights + env_weight;
         
-        if (total_sources == 0) return sample;
+        if (total_geo_lights == 0 && !has_env) return sample;
         
         // Pick a random light source
         // Give environment map equal weight to all other lights combined for balanced sampling
         double rand_val = random_double();
         bool sample_environment = false;
         
-        if (has_env && total_lights > 0) {
+        if (has_env && total_geo_lights > 0) {
             // 50% chance environment, 50% chance geometry lights
             sample_environment = (rand_val < 0.5);
             rand_val = (sample_environment) ? (rand_val * 2.0) : ((rand_val - 0.5) * 2.0);
@@ -294,35 +322,62 @@ public:
                 sample.valid = true;
                 
                 // Adjust PDF for light selection probability
-                if (total_lights > 0) {
+                if (total_geo_lights > 0) {
                     sample.pdf *= 0.5;  // Environment had 50% selection probability
                 }
-                // If only environment, pdf stays as-is (100% selection)
             }
         } else {
-            // Sample geometry lights (point lights or emissive spheres)
-            size_t light_idx = static_cast<size_t>(rand_val * total_lights);
-            if (light_idx >= total_lights) light_idx = total_lights - 1;
+            // Sample geometry lights uniformly
+            size_t light_idx = static_cast<size_t>(rand_val * total_geo_lights);
+            if (light_idx >= total_geo_lights) light_idx = total_geo_lights - 1;
             
-            if (light_idx < lights.size()) {
-                // Point light
+            size_t offset = 0;
+            
+            // Point lights
+            if (light_idx < num_point_lights) {
                 const PointLight& pl = lights[light_idx];
                 sample.position = pl.position;
-                sample.normal = {0, -1, 0};  // Point lights don't have orientation
+                sample.normal = {0, -1, 0};
                 sample.emission = pl.intensity;
-                sample.pdf = 1.0;  // Delta distribution for point
-                vec3 to_light = vec3_sub(pl.position, from_point);
-                sample.distance = vec3_length(to_light);
+                sample.pdf = 1.0;  // Delta distribution
+                sample.distance = vec3_length(vec3_sub(pl.position, from_point));
                 sample.valid = true;
-            } else {
-                // Emissive sphere
-                size_t sphere_idx = emissive_spheres[light_idx - lights.size()];
+            }
+            offset += num_point_lights;
+            
+            // Emissive spheres
+            if (!sample.valid && light_idx < offset + num_emissive_spheres) {
+                size_t sphere_idx = emissive_spheres[light_idx - offset];
                 sample = sample_sphere_light(sphere_idx, from_point);
+            }
+            offset += num_emissive_spheres;
+            
+            // Quad lights
+            if (!sample.valid && light_idx < offset + num_quad_lights) {
+                const QuadLight& ql = quad_lights[light_idx - offset];
+                sample.position = ql.sample_point();
+                sample.normal = ql.normal;
+                sample.emission = ql.emission;
+                sample.pdf = ql.pdf();
+                sample.distance = vec3_length(vec3_sub(sample.position, from_point));
+                sample.valid = true;
+            }
+            offset += num_quad_lights;
+            
+            // Disk lights
+            if (!sample.valid && light_idx < offset + num_disk_lights) {
+                const DiskLight& dl = disk_lights[light_idx - offset];
+                sample.position = dl.sample_point();
+                sample.normal = dl.normal;
+                sample.emission = dl.emission;
+                sample.pdf = dl.pdf();
+                sample.distance = vec3_length(vec3_sub(sample.position, from_point));
+                sample.valid = true;
             }
             
             // Adjust PDF for light selection probability
             if (sample.valid) {
-                sample.pdf /= static_cast<double>(total_lights);
+                sample.pdf /= static_cast<double>(total_geo_lights);
                 if (has_env) {
                     sample.pdf *= 0.5;  // Geometry lights had 50% selection probability
                 }
@@ -351,24 +406,55 @@ public:
      */
     double light_pdf(point3 from_point, point3 light_point) const {
         auto emissive_spheres = get_emissive_spheres();
-        size_t total_lights = lights.size() + emissive_spheres.size();
+        size_t total_geo_lights = lights.size() + emissive_spheres.size() + 
+                                  quad_lights.size() + disk_lights.size();
         bool has_env = environment && environment->has_importance_sampling();
         
-        if (total_lights == 0 && !has_env) return 0.0;
+        if (total_geo_lights == 0 && !has_env) return 0.0;
         
-        // Check which light this point belongs to
+        double selection_prob = 1.0 / static_cast<double>(total_geo_lights);
+        if (has_env) selection_prob *= 0.5;
+        
+        // Check emissive spheres
         for (size_t i = 0; i < emissive_spheres.size(); ++i) {
             const Sphere& s = spheres[emissive_spheres[i]];
             vec3 to_center = vec3_sub(light_point, s.center);
             double dist_sq = vec3_length_squared(to_center);
             double r_sq = s.radius * s.radius;
             
-            // Point is on sphere surface (within tolerance)
             if (std::abs(dist_sq - r_sq) < r_sq * 0.01) {
                 double area = 4.0 * 3.14159265358979323846 * r_sq;
-                double pdf = (1.0 / area) / static_cast<double>(total_lights);
-                if (has_env) pdf *= 0.5;  // Geometry had 50% selection probability
-                return pdf;
+                return selection_prob / area;
+            }
+        }
+        
+        // Check quad lights
+        for (const auto& ql : quad_lights) {
+            // Check if point is on this quad (within tolerance)
+            vec3 to_point = vec3_sub(light_point, ql.corner);
+            double dist_to_plane = std::abs(vec3_dot(to_point, ql.normal));
+            
+            if (dist_to_plane < 0.01) {
+                // Project onto quad
+                double u_len_sq = vec3_length_squared(ql.edge_u);
+                double v_len_sq = vec3_length_squared(ql.edge_v);
+                double u_proj = vec3_dot(to_point, ql.edge_u) / u_len_sq;
+                double v_proj = vec3_dot(to_point, ql.edge_v) / v_len_sq;
+                
+                if (u_proj >= -0.01 && u_proj <= 1.01 && v_proj >= -0.01 && v_proj <= 1.01) {
+                    return selection_prob / ql.area;
+                }
+            }
+        }
+        
+        // Check disk lights
+        for (const auto& dl : disk_lights) {
+            vec3 to_point = vec3_sub(light_point, dl.center);
+            double dist_to_plane = std::abs(vec3_dot(to_point, dl.normal));
+            double radial_dist_sq = vec3_length_squared(to_point) - dist_to_plane * dist_to_plane;
+            
+            if (dist_to_plane < 0.01 && radial_dist_sq <= dl.radius * dl.radius * 1.01) {
+                return selection_prob / dl.area;
             }
         }
         
@@ -387,12 +473,13 @@ public:
         }
         
         auto emissive_spheres = get_emissive_spheres();
-        size_t total_lights = lights.size() + emissive_spheres.size();
+        size_t total_geo_lights = lights.size() + emissive_spheres.size() + 
+                                  quad_lights.size() + disk_lights.size();
         
         double pdf = environment->pdf(direction);
         
         // Adjust for light selection probability
-        if (total_lights > 0) {
+        if (total_geo_lights > 0) {
             pdf *= 0.5;  // Environment had 50% selection probability
         }
         // If only environment, pdf stays as-is
@@ -559,7 +646,57 @@ public:
             }
         }
         
+        // Test quad lights (need to be visible and emit light)
+        for (size_t i = 0; i < quad_lights.size(); ++i) {
+            const auto& ql = quad_lights[i];
+            if (ql.hit(r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+                // Mark as emissive area light (use negative index to distinguish)
+                rec.material_id = -static_cast<int>(i) - 1;  // -1, -2, -3, etc.
+            }
+        }
+        
+        // Test disk lights
+        for (size_t i = 0; i < disk_lights.size(); ++i) {
+            const auto& dl = disk_lights[i];
+            if (dl.hit(r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+                // Mark as emissive disk light (use large negative index)
+                rec.material_id = -1000 - static_cast<int>(i);  // -1000, -1001, etc.
+            }
+        }
+        
         return hit_anything;
+    }
+    
+    /**
+     * @brief Check if a material ID represents an area light
+     */
+    bool is_area_light(int material_id) const {
+        return material_id < 0;
+    }
+    
+    /**
+     * @brief Get emission for an area light by material ID
+     */
+    color get_area_light_emission(int material_id) const {
+        if (material_id >= -static_cast<int>(quad_lights.size()) && material_id < 0) {
+            // Quad light: -1, -2, -3 -> index 0, 1, 2
+            size_t idx = static_cast<size_t>(-material_id - 1);
+            return quad_lights[idx].emission;
+        }
+        if (material_id <= -1000) {
+            // Disk light: -1000, -1001 -> index 0, 1
+            size_t idx = static_cast<size_t>(-material_id - 1000);
+            if (idx < disk_lights.size()) {
+                return disk_lights[idx].emission;
+            }
+        }
+        return {0, 0, 0};
     }
     
     /**

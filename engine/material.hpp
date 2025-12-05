@@ -54,6 +54,12 @@ struct Material {
     double fuzz = 0.0;                // Metal roughness (0 = mirror)
     double refraction_index = 1.5;    // Index of refraction for dielectrics
     
+    // PBR texture maps
+    NormalMap normal_map;             // Normal map for surface detail
+    RoughnessMap roughness_map;       // Roughness map for varying roughness
+    bool has_normal_map = false;
+    bool has_roughness_map = false;
+    
     /**
      * @brief Get the color at a given point
      */
@@ -62,6 +68,40 @@ struct Material {
             return texture.sample(p, u, v);
         }
         return albedo;
+    }
+    
+    /**
+     * @brief Get effective roughness at a given UV (base fuzz modulated by roughness map)
+     */
+    double get_roughness(double u, double v) const {
+        if (has_roughness_map && roughness_map.valid()) {
+            return roughness_map.sample(u, v);
+        }
+        return fuzz;
+    }
+    
+    /**
+     * @brief Get perturbed normal from normal map
+     * @param normal Original geometric normal
+     * @param u UV coordinate
+     * @param v UV coordinate
+     * @return Perturbed normal (or original if no normal map)
+     */
+    vec3 get_shading_normal(vec3 normal, double u, double v) const {
+        if (!has_normal_map || !normal_map.valid()) {
+            return normal;
+        }
+        
+        // Sample tangent-space normal
+        vec3 tangent_n = normal_map.sample(u, v);
+        
+        // Build tangent frame from geometric normal
+        // This is an approximation - proper tangent would come from UV derivatives
+        vec3 up = (std::fabs(normal.y) < 0.999) ? vec3{0, 1, 0} : vec3{1, 0, 0};
+        vec3 tangent = vec3_normalize(vec3_cross(up, normal));
+        vec3 bitangent = vec3_cross(normal, tangent);
+        
+        return NormalMap::tangent_to_world(tangent_n, normal, tangent, bitangent);
     }
     
     /**
@@ -106,14 +146,17 @@ struct Material {
             case MaterialType::Metal: {
                 vec3 reflected = vec3_reflect(vec3_normalize(r_in.direction), rec.normal);
                 
-                if (fuzz > 0.0) {
-                    vec3 fuzz_vec = vec3_scale(random_unit_vector(), fuzz);
+                // Get effective roughness (from map or base fuzz)
+                double effective_fuzz = get_roughness(rec.u, rec.v);
+                
+                if (effective_fuzz > 0.0) {
+                    vec3 fuzz_vec = vec3_scale(random_unit_vector(), effective_fuzz);
                     reflected = vec3_normalize(vec3_add(reflected, fuzz_vec));
                 }
                 
                 srec.scattered = ray_create(rec.point, reflected);
                 srec.pdf = 1.0;  // Delta distribution for perfect mirror
-                srec.is_specular = (fuzz < 0.001);
+                srec.is_specular = (effective_fuzz < 0.001);
                 return vec3_dot(reflected, rec.normal) > 0;
             }
             
@@ -234,6 +277,24 @@ struct Material {
         m.emission = emit;
         m.has_texture = false;
         return m;
+    }
+    
+    /**
+     * @brief Set a normal map on this material
+     */
+    Material& with_normal_map(NormalMap nmap) {
+        normal_map = nmap;
+        has_normal_map = nmap.valid();
+        return *this;
+    }
+    
+    /**
+     * @brief Set a roughness map on this material
+     */
+    Material& with_roughness_map(RoughnessMap rmap) {
+        roughness_map = rmap;
+        has_roughness_map = rmap.valid();
+        return *this;
     }
     
     /**

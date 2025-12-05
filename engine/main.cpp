@@ -60,6 +60,8 @@ int main(int argc, char* argv[]) {
     RenderMode render_mode = RenderMode::Whitted;
     bool use_nee = true;
     bool use_mis = true;
+    ToneMapper tone_mapper = ToneMapper::ACES;
+    double exposure = 1.0;
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -107,6 +109,22 @@ int main(int argc, char* argv[]) {
             continue;
         }
         
+        // --tonemapper name flag (none, reinhard, aces, uncharted2)
+        if (arg == "--tonemapper" && i + 1 < argc) {
+            std::string val = argv[++i];
+            if (val == "none") tone_mapper = ToneMapper::None;
+            else if (val == "reinhard") tone_mapper = ToneMapper::Reinhard;
+            else if (val == "aces") tone_mapper = ToneMapper::ACES;
+            else if (val == "uncharted2") tone_mapper = ToneMapper::Uncharted2;
+            continue;
+        }
+        
+        // --exposure N flag
+        if (arg == "--exposure" && i + 1 < argc) {
+            exposure = std::stod(argv[++i]);
+            continue;
+        }
+        
         // Check if it's a JSON file
         if (arg.size() > 5 && arg.substr(arg.size() - 5) == ".json") {
             auto data = SceneLoader::load(arg);
@@ -125,6 +143,8 @@ int main(int argc, char* argv[]) {
                 render_mode = data.mode;
                 use_nee = data.use_nee;
                 use_mis = data.use_mis;
+                tone_mapper = data.tone_mapper;
+                exposure = data.exposure;
                 loaded_scene = true;
             }
         } else if (arg[0] != '-') {
@@ -151,6 +171,8 @@ int main(int argc, char* argv[]) {
     settings.mode = render_mode;
     settings.use_nee = use_nee;
     settings.use_mis = use_mis;
+    settings.tone_mapper = tone_mapper;
+    settings.exposure = exposure;
     
     Renderer renderer(settings);
     

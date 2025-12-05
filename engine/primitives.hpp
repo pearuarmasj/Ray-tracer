@@ -52,6 +52,10 @@ struct Plane {
         hit_record_set_face_normal(&rec, r, normal);
         rec.material_id = material_id;
         
+        // Compute tangent (arbitrary direction perpendicular to normal)
+        vec3 up = (std::fabs(normal.y) < 0.999) ? vec3{0, 1, 0} : vec3{1, 0, 0};
+        rec.tangent = vec3_normalize(vec3_cross(up, normal));
+        
         return true;
     }
 };
@@ -110,6 +114,13 @@ struct Triangle {
         vec3 outward_normal = vec3_normalize(vec3_cross(edge1, edge2));
         hit_record_set_face_normal(&rec, r, outward_normal);
         rec.material_id = material_id;
+        
+        // Tangent is along the first edge
+        rec.tangent = vec3_normalize(edge1);
+        
+        // Store barycentric as UV (u already computed above)
+        rec.u = u;
+        rec.v = v;
         
         return true;
     }
@@ -182,6 +193,241 @@ struct Box {
         
         hit_record_set_face_normal(&rec, r, outward_normal);
         rec.material_id = material_id;
+        
+        // Compute tangent based on face orientation
+        if (std::fabs(outward_normal.x) > 0.5) {
+            rec.tangent = {0, 0, 1};  // X-facing: tangent along Z
+        } else if (std::fabs(outward_normal.y) > 0.5) {
+            rec.tangent = {1, 0, 0};  // Y-facing: tangent along X
+        } else {
+            rec.tangent = {1, 0, 0};  // Z-facing: tangent along X
+        }
+        
+        return true;
+    }
+};
+
+// Forward declare random function
+double random_double();
+
+/**
+ * @brief Quad (rectangular) area light
+ * 
+ * Defined by a corner point and two edge vectors.
+ * The light emits from one side (determined by the cross product of edges).
+ */
+struct QuadLight {
+    point3 corner;      // Corner position
+    vec3 edge_u;        // First edge vector (from corner)
+    vec3 edge_v;        // Second edge vector (from corner)
+    vec3 normal;        // Normal (computed from edges, points toward emission)
+    color emission;     // Emitted radiance
+    double area;        // Surface area
+    int material_id;    // Optional material for visibility (emissive)
+    
+    QuadLight(point3 corner_, vec3 u, vec3 v, color emit, int mat_id = -1)
+        : corner(corner_), edge_u(u), edge_v(v), emission(emit), material_id(mat_id) 
+    {
+        vec3 cross = vec3_cross(edge_u, edge_v);
+        area = vec3_length(cross);
+        normal = vec3_scale(cross, 1.0 / area);  // Normalize
+    }
+    
+    /**
+     * @brief Create a centered quad light
+     * @param center Center position of the quad
+     * @param u_dir Direction of first edge (will be normalized and scaled by width)
+     * @param v_dir Direction of second edge (will be normalized and scaled by height)
+     * @param width Width along u direction
+     * @param height Height along v direction
+     * @param emit Emission color/intensity
+     */
+    static QuadLight centered(point3 center, vec3 u_dir, vec3 v_dir, 
+                               double width, double height, color emit, int mat_id = -1) {
+        vec3 u = vec3_scale(vec3_normalize(u_dir), width);
+        vec3 v = vec3_scale(vec3_normalize(v_dir), height);
+        // Corner = center - u/2 - v/2
+        point3 corner = vec3_sub(vec3_sub(center, vec3_scale(u, 0.5)), vec3_scale(v, 0.5));
+        return QuadLight(corner, u, v, emit, mat_id);
+    }
+    
+    /**
+     * @brief Sample a random point on the quad
+     * @return Point on the quad surface
+     */
+    point3 sample_point() const {
+        double u = random_double();
+        double v = random_double();
+        return vec3_add(corner, vec3_add(vec3_scale(edge_u, u), vec3_scale(edge_v, v)));
+    }
+    
+    /**
+     * @brief Get the PDF for uniform sampling (1/area)
+     */
+    double pdf() const {
+        return 1.0 / area;
+    }
+    
+    /**
+     * @brief Test ray-quad intersection
+     */
+    bool hit(ray r, double t_min, double t_max, hit_record& rec) const {
+        // Plane intersection first
+        double denom = vec3_dot(normal, r.direction);
+        if (std::fabs(denom) < 1e-8) {
+            return false;
+        }
+        
+        vec3 corner_to_origin = vec3_sub(corner, r.origin);
+        double t = vec3_dot(corner_to_origin, normal) / denom;
+        
+        if (t < t_min || t > t_max) {
+            return false;
+        }
+        
+        // Check if hit point is within quad bounds
+        point3 p = ray_at(r, t);
+        vec3 d = vec3_sub(p, corner);
+        
+        // Project onto edge vectors
+        double u_len_sq = vec3_length_squared(edge_u);
+        double v_len_sq = vec3_length_squared(edge_v);
+        double u_proj = vec3_dot(d, edge_u) / u_len_sq;
+        double v_proj = vec3_dot(d, edge_v) / v_len_sq;
+        
+        if (u_proj < 0.0 || u_proj > 1.0 || v_proj < 0.0 || v_proj > 1.0) {
+            return false;
+        }
+        
+        rec.t = t;
+        rec.point = p;
+        hit_record_set_face_normal(&rec, r, normal);
+        rec.material_id = material_id;
+        rec.u = u_proj;
+        rec.v = v_proj;
+        
+        // Tangent is along edge_u
+        rec.tangent = vec3_normalize(edge_u);
+        
+        return true;
+    }
+};
+
+/**
+ * @brief Disk area light
+ * 
+ * Circular light defined by center, normal, and radius.
+ */
+struct DiskLight {
+    point3 center;      // Center position
+    vec3 normal;        // Normal direction (emission direction)
+    double radius;      // Disk radius
+    color emission;     // Emitted radiance
+    double area;        // Surface area (PI * r^2)
+    int material_id;    // Optional material for visibility
+    
+    // Local coordinate frame for sampling
+    vec3 tangent;       // U direction on disk
+    vec3 bitangent;     // V direction on disk
+    
+    DiskLight(point3 center_, vec3 normal_, double radius_, color emit, int mat_id = -1)
+        : center(center_), normal(vec3_normalize(normal_)), radius(radius_), 
+          emission(emit), material_id(mat_id)
+    {
+        constexpr double PI = 3.14159265358979323846;
+        area = PI * radius * radius;
+        
+        // Build local coordinate frame
+        vec3 up = (std::fabs(normal.y) < 0.999) ? vec3{0, 1, 0} : vec3{1, 0, 0};
+        tangent = vec3_normalize(vec3_cross(up, normal));
+        bitangent = vec3_cross(normal, tangent);
+    }
+    
+    /**
+     * @brief Sample a random point on the disk (uniform by area)
+     * @return Point on the disk surface
+     */
+    point3 sample_point() const {
+        // Uniform disk sampling using concentric mapping
+        double u = random_double();
+        double v = random_double();
+        
+        // Map to [-1, 1]
+        double sx = 2.0 * u - 1.0;
+        double sy = 2.0 * v - 1.0;
+        
+        double r_sample, theta;
+        if (sx == 0 && sy == 0) {
+            return center;
+        }
+        
+        // Concentric disk mapping
+        if (std::fabs(sx) > std::fabs(sy)) {
+            r_sample = sx;
+            theta = (3.14159265358979323846 / 4.0) * (sy / sx);
+        } else {
+            r_sample = sy;
+            theta = (3.14159265358979323846 / 2.0) - (3.14159265358979323846 / 4.0) * (sx / sy);
+        }
+        
+        double cos_theta = std::cos(theta);
+        double sin_theta = std::sin(theta);
+        double actual_r = radius * r_sample;
+        
+        // Convert to world coordinates
+        vec3 offset = vec3_add(
+            vec3_scale(tangent, actual_r * cos_theta),
+            vec3_scale(bitangent, actual_r * sin_theta)
+        );
+        
+        return vec3_add(center, offset);
+    }
+    
+    /**
+     * @brief Get the PDF for uniform sampling (1/area)
+     */
+    double pdf() const {
+        return 1.0 / area;
+    }
+    
+    /**
+     * @brief Test ray-disk intersection
+     */
+    bool hit(ray r, double t_min, double t_max, hit_record& rec) const {
+        // Plane intersection first
+        double denom = vec3_dot(normal, r.direction);
+        if (std::fabs(denom) < 1e-8) {
+            return false;
+        }
+        
+        vec3 center_to_origin = vec3_sub(center, r.origin);
+        double t = vec3_dot(center_to_origin, normal) / denom;
+        
+        if (t < t_min || t > t_max) {
+            return false;
+        }
+        
+        // Check if hit point is within disk radius
+        point3 p = ray_at(r, t);
+        vec3 d = vec3_sub(p, center);
+        double dist_sq = vec3_length_squared(d);
+        
+        if (dist_sq > radius * radius) {
+            return false;
+        }
+        
+        rec.t = t;
+        rec.point = p;
+        hit_record_set_face_normal(&rec, r, normal);
+        rec.material_id = material_id;
+        
+        // Tangent is the disk's tangent vector
+        rec.tangent = tangent;
+        
+        // Compute UV (polar coordinates on disk)
+        double dist = std::sqrt(dist_sq);
+        rec.u = (dist > 1e-8) ? (vec3_dot(d, tangent) / dist + 1.0) * 0.5 : 0.5;
+        rec.v = (dist > 1e-8) ? (vec3_dot(d, bitangent) / dist + 1.0) * 0.5 : 0.5;
         
         return true;
     }
