@@ -14,6 +14,13 @@ extern "C" {
 #include <string>
 #include <memory>
 #include <algorithm>
+#include <iostream>
+
+// Forward declare stb_image functions (implemented in stb_impl.cpp)
+extern "C" {
+    unsigned char* stbi_load(const char* filename, int* x, int* y, int* comp, int req_comp);
+    void stbi_image_free(void* retval_from_stbi_load);
+}
 
 namespace raytracer {
 
@@ -78,6 +85,27 @@ struct Texture {
         tex.image_data = std::make_shared<std::vector<unsigned char>>(
             data, data + width * height * channels
         );
+        return tex;
+    }
+    
+    /**
+     * @brief Load an image texture from file (PNG, JPG, etc.)
+     * @param filename Path to image file
+     * @return Texture, or magenta solid if loading fails
+     */
+    static Texture load_image(const std::string& filename) {
+        int width, height, channels;
+        unsigned char* data = stbi_load(filename.c_str(), &width, &height, &channels, 3);
+        
+        if (!data) {
+            std::cerr << "Error: Could not load texture: " << filename << std::endl;
+            return solid({1.0, 0.0, 1.0});  // Magenta for error
+        }
+        
+        Texture tex = image(data, width, height, 3);
+        stbi_image_free(data);
+        
+        std::cout << "Loaded texture: " << filename << " (" << width << "x" << height << ")" << std::endl;
         return tex;
     }
     

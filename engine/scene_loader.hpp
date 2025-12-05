@@ -55,6 +55,14 @@ public:
             double scale = tex.value("scale", 10.0);
             return Texture::checker({c1[0], c1[1], c1[2]}, {c2[0], c2[1], c2[2]}, scale);
         }
+        else if (type == "image") {
+            std::string filename = tex.value("file", "");
+            if (filename.empty()) {
+                std::cerr << "Error: Image texture missing 'file' property" << std::endl;
+                return Texture::solid({1.0, 0.0, 1.0});  // Magenta for error
+            }
+            return Texture::load_image(filename);
+        }
         else {
             // Solid color
             auto c = tex.value("color", std::vector<double>{0.5, 0.5, 0.5});
@@ -217,8 +225,8 @@ public:
         // Load render settings
         if (j.contains("render")) {
             auto& r = j["render"];
-            data.width = r.value("width", 1920);
-            data.height = r.value("height", 1080);
+            data.width = r.value("width", 2560);
+            data.height = r.value("height", 1440);
             data.samples = r.value("samples", 16);
             data.max_depth = r.value("max_depth", 50);
             data.output_file = r.value("output", "output.png");
