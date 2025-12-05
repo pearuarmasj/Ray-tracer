@@ -14,9 +14,11 @@ extern "C" {
 #include "sphere.hpp"
 #include "primitives.hpp"
 #include "material.hpp"
+#include "bvh.hpp"
 #include <vector>
 #include <limits>
 #include <cmath>
+#include <iostream>
 
 namespace raytracer {
 
@@ -89,6 +91,12 @@ struct Camera {
     }
 };
 
+// Primitive type constants for BVH
+constexpr int PRIM_SPHERE = 0;
+constexpr int PRIM_PLANE = 1;
+constexpr int PRIM_TRIANGLE = 2;
+constexpr int PRIM_BOX = 3;
+
 /**
  * @brief Scene containing objects and materials
  */
@@ -101,6 +109,11 @@ public:
     std::vector<Material> materials;
     std::vector<PointLight> lights;
     
+private:
+    mutable BVH bvh_;
+    mutable bool bvh_dirty_ = true;
+    
+public:
     /**
      * @brief Add a material and return its ID
      */
@@ -115,6 +128,7 @@ public:
      */
     void add_sphere(point3 center, double radius, int material_id) {
         spheres.emplace_back(center, radius, material_id);
+        bvh_dirty_ = true;
     }
     
     /**
@@ -122,6 +136,7 @@ public:
      */
     void add_plane(point3 point, vec3 normal, int material_id) {
         planes.emplace_back(point, normal, material_id);
+        // Planes are infinite - handled separately, not in BVH
     }
     
     /**
@@ -129,6 +144,7 @@ public:
      */
     void add_triangle(point3 v0, point3 v1, point3 v2, int material_id) {
         triangles.emplace_back(v0, v1, v2, material_id);
+        bvh_dirty_ = true;
     }
     
     /**
@@ -136,6 +152,7 @@ public:
      */
     void add_box(point3 min_pt, point3 max_pt, int material_id) {
         boxes.emplace_back(min_pt, max_pt, material_id);
+        bvh_dirty_ = true;
     }
     
     /**
@@ -143,6 +160,7 @@ public:
      */
     void add_box_centered(point3 center, double w, double h, double d, int material_id) {
         boxes.push_back(Box::centered(center, w, h, d, material_id));
+        bvh_dirty_ = true;
     }
     
     /**
@@ -150,6 +168,58 @@ public:
      */
     void add_light(point3 position, color intensity) {
         lights.emplace_back(position, intensity);
+    }
+    
+    /**
+     * @brief Build or rebuild the BVH
+     */
+    void build_bvh() const {
+        if (!bvh_dirty_) return;
+        
+        std::vector<BVHPrimitive> prims;
+        prims.reserve(spheres.size() + triangles.size() + boxes.size());
+        
+        // Add spheres
+        for (int i = 0; i < static_cast<int>(spheres.size()); ++i) {
+            const auto& s = spheres[i];
+            BVHPrimitive p;
+            p.type = PRIM_SPHERE;
+            p.index = i;
+            // Sphere bounding box
+            vec3 rad = {s.radius, s.radius, s.radius};
+            p.bounds.min_pt = vec3_sub(s.center, rad);
+            p.bounds.max_pt = vec3_add(s.center, rad);
+            prims.push_back(p);
+        }
+        
+        // Add triangles
+        for (int i = 0; i < static_cast<int>(triangles.size()); ++i) {
+            const auto& t = triangles[i];
+            BVHPrimitive p;
+            p.type = PRIM_TRIANGLE;
+            p.index = i;
+            p.bounds.expand(t.v0);
+            p.bounds.expand(t.v1);
+            p.bounds.expand(t.v2);
+            prims.push_back(p);
+        }
+        
+        // Add boxes
+        for (int i = 0; i < static_cast<int>(boxes.size()); ++i) {
+            const auto& b = boxes[i];
+            BVHPrimitive p;
+            p.type = PRIM_BOX;
+            p.index = i;
+            p.bounds.min_pt = b.box_min;
+            p.bounds.max_pt = b.box_max;
+            prims.push_back(p);
+        }
+        
+        bvh_.build(std::move(prims));
+        bvh_dirty_ = false;
+        
+        std::cout << "BVH built: " << bvh_.nodes.size() << " nodes for " 
+                  << bvh_.primitives.size() << " primitives" << std::endl;
     }
     
     /**
@@ -164,7 +234,6 @@ public:
         ray shadow_ray = ray_create(point, to_light);
         
         hit_record rec;
-        // Check if anything blocks the path to the light
         if (hit(shadow_ray, 0.001, distance, rec)) {
             return true;
         }
@@ -172,7 +241,7 @@ public:
     }
     
     /**
-     * @brief Test ray against all objects in scene
+     * @brief Test ray against all objects in scene (uses BVH)
      * @param r The ray
      * @param t_min Minimum t value
      * @param t_max Maximum t value
@@ -180,36 +249,38 @@ public:
      * @return true if any intersection found
      */
     bool hit(ray r, double t_min, double t_max, hit_record& rec) const {
+        // Build BVH if needed
+        if (bvh_dirty_) {
+            build_bvh();
+        }
+        
         hit_record temp_rec;
         bool hit_anything = false;
         double closest_so_far = t_max;
         
-        for (const auto& sphere : spheres) {
-            if (sphere.hit(r, t_min, closest_so_far, temp_rec)) {
-                hit_anything = true;
-                closest_so_far = temp_rec.t;
-                rec = temp_rec;
+        // Test BVH (spheres, triangles, boxes)
+        auto hit_func = [this](int type, int index, ray r, double t_min, double t_max, hit_record& rec) -> bool {
+            switch (type) {
+                case PRIM_SPHERE:
+                    return spheres[index].hit(r, t_min, t_max, rec);
+                case PRIM_TRIANGLE:
+                    return triangles[index].hit(r, t_min, t_max, rec);
+                case PRIM_BOX:
+                    return boxes[index].hit(r, t_min, t_max, rec);
+                default:
+                    return false;
             }
+        };
+        
+        if (bvh_.hit(r, t_min, closest_so_far, temp_rec, hit_func)) {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
         }
         
+        // Test planes separately (infinite, can't be bounded)
         for (const auto& plane : planes) {
             if (plane.hit(r, t_min, closest_so_far, temp_rec)) {
-                hit_anything = true;
-                closest_so_far = temp_rec.t;
-                rec = temp_rec;
-            }
-        }
-        
-        for (const auto& triangle : triangles) {
-            if (triangle.hit(r, t_min, closest_so_far, temp_rec)) {
-                hit_anything = true;
-                closest_so_far = temp_rec.t;
-                rec = temp_rec;
-            }
-        }
-        
-        for (const auto& box : boxes) {
-            if (box.hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
                 rec = temp_rec;
