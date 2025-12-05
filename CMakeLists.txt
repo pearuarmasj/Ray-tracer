@@ -1,5 +1,5 @@
 # CMakeList.txt : CMake project for Ray tracer
-# Mixed C23/C++23 Whitted-style ray tracer
+# Mixed C23/C++23 Ray tracer
 cmake_minimum_required(VERSION 3.21)
 
 # Enable Hot Reload for MSVC compilers if supported.
