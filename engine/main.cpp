@@ -1,0 +1,91 @@
+/**
+ * @file main.cpp
+ * @brief Entry point for the ray tracer
+ * 
+ * This creates a simple demo scene and renders it to a PPM image.
+ */
+
+#include "renderer.hpp"
+#include "scene.hpp"
+#include "material.hpp"
+
+#include <iostream>
+#include <string>
+
+using namespace raytracer;
+
+/**
+ * @brief Create a demo scene with several spheres
+ */
+Scene create_demo_scene() {
+    Scene scene;
+    
+    // Add materials
+    int mat_ground = scene.add_material(Material::lambertian({0.8, 0.8, 0.0}));
+    int mat_center = scene.add_material(Material::lambertian({0.1, 0.2, 0.5}));
+    int mat_left = scene.add_material(Material::dielectric(1.5));
+    int mat_right = scene.add_material(Material::metal({0.8, 0.6, 0.2}, 0.0));
+    
+    // Add spheres
+    // Ground sphere (large, acts as floor)
+    scene.add_sphere({0.0, -100.5, -1.0}, 100.0, mat_ground);
+    
+    // Center sphere (diffuse blue)
+    scene.add_sphere({0.0, 0.0, -1.0}, 0.5, mat_center);
+    
+    // Left sphere (glass)
+    scene.add_sphere({-1.0, 0.0, -1.0}, 0.5, mat_left);
+    
+    // Right sphere (metal gold)
+    scene.add_sphere({1.0, 0.0, -1.0}, 0.5, mat_right);
+    
+    return scene;
+}
+
+int main(int argc, char* argv[]) {
+    std::cout << "=== Whitted-Style Ray Tracer ===" << std::endl;
+    
+    // Parse command line for output filename
+    std::string output_file = "output.ppm";
+    if (argc > 1) {
+        output_file = argv[1];
+    }
+    
+    // Image settings
+    const double aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    
+    // Create camera
+    point3 lookfrom = {0.0, 0.0, 0.0};
+    point3 lookat = {0.0, 0.0, -1.0};
+    vec3 vup = {0.0, 1.0, 0.0};
+    double vfov = 90.0;
+    
+    Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio);
+    
+    // Create scene
+    Scene scene = create_demo_scene();
+    
+    // Set up renderer
+    Renderer::Settings settings;
+    settings.width = image_width;
+    settings.height = image_height;
+    settings.max_depth = 10;
+    settings.samples_per_pixel = 1;
+    
+    Renderer renderer(settings);
+    
+    // Render!
+    Image image = renderer.render(scene, camera);
+    
+    // Save output
+    if (image.write_ppm(output_file)) {
+        std::cout << "Image saved to: " << output_file << std::endl;
+    } else {
+        std::cerr << "Error: Failed to save image to " << output_file << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}
