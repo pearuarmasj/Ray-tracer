@@ -1,6 +1,7 @@
 # Ray Tracer
 
 A **Whitted-style ray tracer** built with a C core layer (C23) and C++ engine layer (C++23).
+However, I plan on using different, more advanced algorithms in the future, this is just as a simple start for learning.
 
 ## Features
 
