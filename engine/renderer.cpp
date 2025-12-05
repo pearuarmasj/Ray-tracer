@@ -11,12 +11,21 @@
 #include <iostream>
 #include <vector>
 #include <atomic>
+#include <random>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 namespace raytracer {
+
+// Thread-local random number generator
+thread_local std::mt19937 rng{std::random_device{}()};
+thread_local std::uniform_real_distribution<double> dist(0.0, 1.0);
+
+inline double random_double() {
+    return dist(rng);
+}
 
 bool Image::write_ppm(const std::string& filename) const {
     std::ofstream file(filename);
@@ -97,10 +106,9 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
             color pixel_color = vec3_zero();
             
             for (int s = 0; s < settings_.samples_per_pixel; ++s) {
-                // For single sample, use center of pixel
-                // For multiple samples, could add random offset (not implemented for simplicity)
-                double u = (static_cast<double>(x) + 0.5) / settings_.width;
-                double v = (static_cast<double>(y) + 0.5) / settings_.height;
+                // Random jitter within pixel for anti-aliasing
+                double u = (static_cast<double>(x) + random_double()) / settings_.width;
+                double v = (static_cast<double>(y) + random_double()) / settings_.height;
                 
                 ray r = camera.get_ray(u, v);
                 pixel_color = vec3_add(pixel_color, ray_color(r, scene, settings_.max_depth));
@@ -176,8 +184,9 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 bool cannot_refract = refraction_ratio * sin_theta > 1.0;
                 vec3 direction;
                 
-                if (cannot_refract || Material::reflectance(cos_theta, refraction_ratio) > 0.5) {
-                    // Must reflect (total internal reflection or Fresnel)
+                // Use random number for probabilistic Fresnel reflection
+                if (cannot_refract || Material::reflectance(cos_theta, refraction_ratio) > random_double()) {
+                    // Reflect (total internal reflection or Fresnel)
                     direction = vec3_reflect(unit_direction, rec.normal);
                 } else {
                     // Refract
