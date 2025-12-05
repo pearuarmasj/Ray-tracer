@@ -175,17 +175,28 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
         
         switch (mat.type) {
             case MaterialType::Lambertian: {
-                // True Lambertian diffuse reflection with random scattering
-                vec3 scatter_direction = vec3_add(rec.normal, random_unit_vector());
+                // Calculate direct lighting from all lights
+                color direct_light = vec3_zero();
+                for (const auto& light : scene.lights) {
+                    if (!scene.is_shadowed(rec.point, light.position)) {
+                        vec3 light_dir = vec3_normalize(vec3_sub(light.position, rec.point));
+                        double diffuse = std::fmax(0.0, vec3_dot(rec.normal, light_dir));
+                        direct_light = vec3_add(direct_light, vec3_scale(light.intensity, diffuse));
+                    }
+                }
                 
-                // Catch degenerate scatter direction (if random vector is opposite to normal)
+                // Indirect lighting via random scattering
+                vec3 scatter_direction = vec3_add(rec.normal, random_unit_vector());
                 if (vec3_length_squared(scatter_direction) < 1e-8) {
                     scatter_direction = rec.normal;
                 }
                 
                 ray scattered = ray_create(rec.point, scatter_direction);
-                color attenuation = mat.albedo;
-                return vec3_mul(attenuation, ray_color(scattered, scene, depth - 1));
+                color indirect = ray_color(scattered, scene, depth - 1);
+                
+                // Combine direct + indirect lighting
+                color total_light = vec3_add(direct_light, indirect);
+                return vec3_mul(mat.albedo, total_light);
             }
             
             case MaterialType::Metal: {

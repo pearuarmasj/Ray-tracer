@@ -39,6 +39,10 @@ Scene create_demo_scene() {
     // Right sphere (metal gold)
     scene.add_sphere({1.0, 0.0, -1.0}, 0.5, mat_right);
     
+    // Add lights
+    scene.add_light({-2.0, 3.0, 1.0}, {0.6, 0.6, 0.6});  // Main light (upper left)
+    scene.add_light({2.0, 2.0, 2.0}, {0.3, 0.3, 0.3});   // Fill light (upper right)
+    
     return scene;
 }
 

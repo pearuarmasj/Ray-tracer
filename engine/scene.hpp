@@ -20,6 +20,16 @@ extern "C" {
 namespace raytracer {
 
 /**
+ * @brief Point light source
+ */
+struct PointLight {
+    point3 position;
+    color intensity;  // Light color and brightness
+    
+    PointLight(point3 pos, color c) : position(pos), intensity(c) {}
+};
+
+/**
  * @brief Camera for generating rays
  */
 struct Camera {
@@ -85,6 +95,7 @@ class Scene {
 public:
     std::vector<Sphere> spheres;
     std::vector<Material> materials;
+    std::vector<PointLight> lights;
     
     /**
      * @brief Add a material and return its ID
@@ -100,6 +111,32 @@ public:
      */
     void add_sphere(point3 center, double radius, int material_id) {
         spheres.emplace_back(center, radius, material_id);
+    }
+    
+    /**
+     * @brief Add a point light to the scene
+     */
+    void add_light(point3 position, color intensity) {
+        lights.emplace_back(position, intensity);
+    }
+    
+    /**
+     * @brief Check if a point is in shadow from a light
+     * @param point The surface point
+     * @param light_pos The light position
+     * @return true if point is in shadow
+     */
+    bool is_shadowed(point3 point, point3 light_pos) const {
+        vec3 to_light = vec3_sub(light_pos, point);
+        double distance = vec3_length(to_light);
+        ray shadow_ray = ray_create(point, to_light);
+        
+        hit_record rec;
+        // Check if anything blocks the path to the light
+        if (hit(shadow_ray, 0.001, distance, rec)) {
+            return true;
+        }
+        return false;
     }
     
     /**
