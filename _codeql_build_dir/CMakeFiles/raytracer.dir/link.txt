@@ -1,1 +1,0 @@
-/home/runner/work/Ray-tracer/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/raytracer.dir/link.d CMakeFiles/raytracer.dir/engine/renderer.cpp.o CMakeFiles/raytracer.dir/engine/main.cpp.o -o raytracer  libraytracer_core.a -lm
