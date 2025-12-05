@@ -4,6 +4,7 @@
  */
 
 #include "renderer.hpp"
+#include "bdpt.hpp"
 #include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
@@ -253,7 +254,13 @@ bool Image::write_png(const std::string& filename) const {
 Image Renderer::render(const Scene& scene, const Camera& camera) const {
     Image image(settings_.width, settings_.height);
     
-    const char* mode_name = (settings_.mode == RenderMode::PathTrace) ? "Path Tracing" : "Whitted";
+    const char* mode_name;
+    switch (settings_.mode) {
+        case RenderMode::PathTrace: mode_name = "Path Tracing"; break;
+        case RenderMode::BDPT: mode_name = "Bidirectional Path Tracing"; break;
+        default: mode_name = "Whitted"; break;
+    }
+    
     std::cout << "Rendering " << settings_.width << "x" << settings_.height 
               << " image (" << mode_name;
     if (settings_.mode == RenderMode::PathTrace) {
@@ -269,6 +276,17 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     
     // Build BVH before parallel rendering (must be single-threaded)
     scene.build_bvh();
+    
+    // Create BDPT integrator if needed
+    BDPTIntegrator bdpt;
+    if (settings_.mode == RenderMode::BDPT) {
+        BDPTIntegrator::Settings bdpt_settings;
+        bdpt_settings.max_eye_depth = settings_.max_depth;
+        bdpt_settings.max_light_depth = settings_.max_depth;
+        bdpt_settings.use_mis = settings_.use_mis;
+        bdpt_settings.clamp_max = settings_.clamp_max;
+        bdpt = BDPTIntegrator(bdpt_settings);
+    }
     
     std::atomic<int> completed_lines{0};
     const int total_lines = settings_.height;
@@ -286,10 +304,16 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
                 ray r = camera.get_ray(u, v);
                 
                 // Choose rendering mode
-                if (settings_.mode == RenderMode::PathTrace) {
-                    pixel_color = vec3_add(pixel_color, ray_color_path(r, scene, settings_.max_depth));
-                } else {
-                    pixel_color = vec3_add(pixel_color, ray_color_whitted(r, scene, settings_.max_depth));
+                switch (settings_.mode) {
+                    case RenderMode::PathTrace:
+                        pixel_color = vec3_add(pixel_color, ray_color_path(r, scene, settings_.max_depth));
+                        break;
+                    case RenderMode::BDPT:
+                        pixel_color = vec3_add(pixel_color, bdpt.Li(r, scene));
+                        break;
+                    default:
+                        pixel_color = vec3_add(pixel_color, ray_color_whitted(r, scene, settings_.max_depth));
+                        break;
                 }
             }
             

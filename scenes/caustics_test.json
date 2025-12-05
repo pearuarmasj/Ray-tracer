@@ -1,0 +1,52 @@
+{
+    "description": "Caustics test - BDPT should handle this better than unidirectional PT",
+    "materials": {
+        "white": {
+            "type": "lambertian",
+            "color": [0.73, 0.73, 0.73]
+        },
+        "red": {
+            "type": "lambertian",
+            "color": [0.65, 0.05, 0.05]
+        },
+        "green": {
+            "type": "lambertian",
+            "color": [0.12, 0.45, 0.15]
+        },
+        "glass": {
+            "type": "glass",
+            "ior": 1.5
+        },
+        "light": {
+            "type": "emissive",
+            "color": [0, 0, 0],
+            "emission": [1, 1, 1],
+            "intensity": 15
+        }
+    },
+    "objects": [
+        {"type": "plane", "position": [0, 0, 0], "normal": [0, 1, 0], "material": "white"},
+        {"type": "plane", "position": [0, 5, 0], "normal": [0, -1, 0], "material": "white"},
+        {"type": "plane", "position": [0, 0, -5], "normal": [0, 0, 1], "material": "white"},
+        {"type": "plane", "position": [-2.5, 0, 0], "normal": [1, 0, 0], "material": "red"},
+        {"type": "plane", "position": [2.5, 0, 0], "normal": [-1, 0, 0], "material": "green"},
+        {"type": "sphere", "position": [0, 1, -2], "radius": 1.0, "material": "glass"},
+        {"type": "sphere", "position": [0, 4.9, -2], "radius": 0.3, "material": "light"}
+    ],
+    "camera": {
+        "position": [0, 2.5, 5],
+        "target": [0, 1, -2],
+        "up": [0, 1, 0],
+        "fov": 50
+    },
+    "render": {
+        "width": 800,
+        "height": 800,
+        "samples": 128,
+        "max_depth": 16,
+        "mode": "bdpt",
+        "output": "caustics_bdpt.png",
+        "tonemapper": "aces",
+        "exposure": 1.0
+    }
+}

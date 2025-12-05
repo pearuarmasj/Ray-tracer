@@ -35,12 +35,14 @@ target_include_directories(raytracer_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # C++ Engine (renderer, scene, materials)
 set(ENGINE_SOURCES
     engine/renderer.cpp
+    engine/bdpt.cpp
     engine/stb_impl.cpp
     engine/main.cpp
 )
 
 set(ENGINE_HEADERS
     engine/renderer.hpp
+    engine/bdpt.hpp
     engine/scene.hpp
     engine/sphere.hpp
     engine/material.hpp

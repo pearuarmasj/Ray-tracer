@@ -62,6 +62,7 @@ int main(int argc, char* argv[]) {
     bool use_mis = true;
     ToneMapper tone_mapper = ToneMapper::ACES;
     double exposure = 1.0;
+    double clamp_max = 10.0;  // Firefly clamping for BDPT
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -80,6 +81,12 @@ int main(int argc, char* argv[]) {
         if (arg == "--pathtrace" || arg == "-p") {
             render_mode = RenderMode::PathTrace;
             samples = 64;  // Path tracing needs more samples
+            continue;
+        }
+        
+        if (arg == "--bdpt" || arg == "-b") {
+            render_mode = RenderMode::BDPT;
+            samples = 64;  // BDPT also needs more samples
             continue;
         }
         
@@ -125,6 +132,12 @@ int main(int argc, char* argv[]) {
             continue;
         }
         
+        // --clamp N flag (firefly clamping, 0 to disable)
+        if (arg == "--clamp" && i + 1 < argc) {
+            clamp_max = std::stod(argv[++i]);
+            continue;
+        }
+        
         // Check if it's a JSON file
         if (arg.size() > 5 && arg.substr(arg.size() - 5) == ".json") {
             auto data = SceneLoader::load(arg);
@@ -145,6 +158,7 @@ int main(int argc, char* argv[]) {
                 use_mis = data.use_mis;
                 tone_mapper = data.tone_mapper;
                 exposure = data.exposure;
+                clamp_max = data.clamp_max;
                 loaded_scene = true;
             }
         } else if (arg[0] != '-') {
@@ -173,6 +187,7 @@ int main(int argc, char* argv[]) {
     settings.use_mis = use_mis;
     settings.tone_mapper = tone_mapper;
     settings.exposure = exposure;
+    settings.clamp_max = clamp_max;
     
     Renderer renderer(settings);
     
