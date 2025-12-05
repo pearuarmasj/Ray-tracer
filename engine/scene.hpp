@@ -180,11 +180,11 @@ public:
         prims.reserve(spheres.size() + triangles.size() + boxes.size());
         
         // Add spheres
-        for (int i = 0; i < static_cast<int>(spheres.size()); ++i) {
+        for (size_t i = 0; i < spheres.size(); ++i) {
             const auto& s = spheres[i];
             BVHPrimitive p;
             p.type = PRIM_SPHERE;
-            p.index = i;
+            p.index = static_cast<int>(i);
             // Sphere bounding box
             vec3 rad = {s.radius, s.radius, s.radius};
             p.bounds.min_pt = vec3_sub(s.center, rad);
@@ -193,11 +193,11 @@ public:
         }
         
         // Add triangles
-        for (int i = 0; i < static_cast<int>(triangles.size()); ++i) {
+        for (size_t i = 0; i < triangles.size(); ++i) {
             const auto& t = triangles[i];
             BVHPrimitive p;
             p.type = PRIM_TRIANGLE;
-            p.index = i;
+            p.index = static_cast<int>(i);
             p.bounds.expand(t.v0);
             p.bounds.expand(t.v1);
             p.bounds.expand(t.v2);
@@ -205,14 +205,20 @@ public:
         }
         
         // Add boxes
-        for (int i = 0; i < static_cast<int>(boxes.size()); ++i) {
+        for (size_t i = 0; i < boxes.size(); ++i) {
             const auto& b = boxes[i];
             BVHPrimitive p;
             p.type = PRIM_BOX;
-            p.index = i;
+            p.index = static_cast<int>(i);
             p.bounds.min_pt = b.box_min;
             p.bounds.max_pt = b.box_max;
             prims.push_back(p);
+        }
+        
+        if (prims.empty()) {
+            std::cout << "BVH: No bounded primitives to build" << std::endl;
+            bvh_dirty_ = false;
+            return;
         }
         
         bvh_.build(std::move(prims));
@@ -249,33 +255,69 @@ public:
      * @return true if any intersection found
      */
     bool hit(ray r, double t_min, double t_max, hit_record& rec) const {
-        // Build BVH if needed
-        if (bvh_dirty_) {
-            build_bvh();
-        }
-        
-        hit_record temp_rec;
+        hit_record temp_rec = {};
         bool hit_anything = false;
         double closest_so_far = t_max;
         
-        // Test BVH (spheres, triangles, boxes)
-        auto hit_func = [this](int type, int index, ray r, double t_min, double t_max, hit_record& rec) -> bool {
-            switch (type) {
-                case PRIM_SPHERE:
-                    return spheres[index].hit(r, t_min, t_max, rec);
-                case PRIM_TRIANGLE:
-                    return triangles[index].hit(r, t_min, t_max, rec);
-                case PRIM_BOX:
-                    return boxes[index].hit(r, t_min, t_max, rec);
-                default:
-                    return false;
+        // Test BVH (spheres, triangles, boxes) using iterative stack-based traversal
+        if (!bvh_.nodes.empty()) {
+            // Stack for iterative traversal (avoid deep recursion issues)
+            int stack[64];
+            int stack_ptr = 0;
+            stack[stack_ptr++] = 0;  // Start with root
+            
+            while (stack_ptr > 0 && stack_ptr < 64) {
+                int node_idx = stack[--stack_ptr];
+                
+                // Bounds check
+                if (node_idx < 0 || node_idx >= static_cast<int>(bvh_.nodes.size())) {
+                    continue;
+                }
+                
+                const BVHNode& node = bvh_.nodes[node_idx];
+                
+                // Test against node bounding box
+                if (!node.bounds.hit(r, t_min, closest_so_far)) {
+                    continue;
+                }
+                
+                // Leaf node - test actual primitives
+                if (node.prim_count > 0) {
+                    for (int i = 0; i < node.prim_count; ++i) {
+                        int prim_idx = node.prim_offset + i;
+                        if (prim_idx < 0 || prim_idx >= static_cast<int>(bvh_.primitives.size())) {
+                            continue;
+                        }
+                        const BVHPrimitive& prim = bvh_.primitives[prim_idx];
+                        bool did_hit = false;
+                        
+                        switch (prim.type) {
+                            case PRIM_SPHERE:
+                                if (prim.index >= 0 && prim.index < static_cast<int>(spheres.size()))
+                                    did_hit = spheres[prim.index].hit(r, t_min, closest_so_far, temp_rec);
+                                break;
+                            case PRIM_TRIANGLE:
+                                if (prim.index >= 0 && prim.index < static_cast<int>(triangles.size()))
+                                    did_hit = triangles[prim.index].hit(r, t_min, closest_so_far, temp_rec);
+                                break;
+                            case PRIM_BOX:
+                                if (prim.index >= 0 && prim.index < static_cast<int>(boxes.size()))
+                                    did_hit = boxes[prim.index].hit(r, t_min, closest_so_far, temp_rec);
+                                break;
+                        }
+                        
+                        if (did_hit) {
+                            hit_anything = true;
+                            closest_so_far = temp_rec.t;
+                            rec = temp_rec;
+                        }
+                    }
+                } else {
+                    // Internal node - push children onto stack
+                    if (node.right >= 0 && stack_ptr < 63) stack[stack_ptr++] = node.right;
+                    if (node.left >= 0 && stack_ptr < 63) stack[stack_ptr++] = node.left;
+                }
             }
-        };
-        
-        if (bvh_.hit(r, t_min, closest_so_far, temp_rec, hit_func)) {
-            hit_anything = true;
-            closest_so_far = temp_rec.t;
-            rec = temp_rec;
         }
         
         // Test planes separately (infinite, can't be bounded)

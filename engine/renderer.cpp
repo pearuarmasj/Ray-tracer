@@ -124,6 +124,9 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
 #endif
     std::cout << "..." << std::endl;
     
+    // Build BVH before parallel rendering (must be single-threaded)
+    scene.build_bvh();
+    
     std::atomic<int> completed_lines{0};
     const int total_lines = settings_.height;
     

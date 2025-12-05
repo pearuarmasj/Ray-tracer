@@ -112,8 +112,8 @@ struct AABB {
  */
 struct BVHPrimitive {
     AABB bounds;
-    int index;      // Index into the original array
-    int type;       // 0=sphere, 1=plane, 2=triangle, 3=box
+    int index = 0;   // Index into the original array
+    int type = 0;    // 0=sphere, 1=plane, 2=triangle, 3=box
     
     point3 centroid() const { return bounds.centroid(); }
 };
@@ -123,8 +123,8 @@ struct BVHPrimitive {
  */
 struct BVHNode {
     AABB bounds;
-    int left = -1;      // Index of left child (-1 if leaf)
-    int right = -1;     // Index of right child
+    int left = -1;       // Index of left child (-1 if leaf)
+    int right = -1;      // Index of right child
     int prim_offset = 0; // Start index in sorted primitive array
     int prim_count = 0;  // Number of primitives (>0 means leaf)
 };
@@ -167,19 +167,20 @@ private:
     int build_recursive(int start, int end) {
         int node_idx = static_cast<int>(nodes.size());
         nodes.emplace_back();
-        BVHNode& node = nodes[node_idx];
         
-        // Compute bounds for this node
+        // Compute bounds for this node (don't hold reference across recursive calls)
+        AABB node_bounds;
         for (int i = start; i < end; ++i) {
-            node.bounds.expand(primitives[i].bounds);
+            node_bounds.expand(primitives[i].bounds);
         }
+        nodes[node_idx].bounds = node_bounds;
         
         int count = end - start;
         
         // Leaf node if few primitives
         if (count <= 2) {
-            node.prim_offset = start;
-            node.prim_count = count;
+            nodes[node_idx].prim_offset = start;
+            nodes[node_idx].prim_count = count;
             return node_idx;
         }
         
@@ -205,11 +206,11 @@ private:
             }
         );
         
-        // Build children (need to update node reference after recursive calls
-        // since vector may reallocate)
+        // Build children - vector may reallocate, so don't hold references
         int left_idx = build_recursive(start, mid);
         int right_idx = build_recursive(mid, end);
         
+        // Now safe to update the node
         nodes[node_idx].left = left_idx;
         nodes[node_idx].right = right_idx;
         
