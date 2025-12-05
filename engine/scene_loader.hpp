@@ -9,6 +9,7 @@
 #include "scene.hpp"
 #include "material.hpp"
 #include "texture.hpp"
+#include "renderer.hpp"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -37,6 +38,7 @@ public:
         int height = 1080;
         int samples = 16;
         int max_depth = 50;
+        RenderMode mode = RenderMode::Whitted;
         
         std::string output_file = "output.png";
     };
@@ -114,6 +116,15 @@ public:
                 else if (type == "dielectric" || type == "glass") {
                     double ior = mat.value("ior", 1.5);
                     m = Material::dielectric(ior);
+                }
+                else if (type == "emissive") {
+                    auto c = mat.value("color", std::vector<double>{1.0, 1.0, 1.0});
+                    auto e = mat.value("emission", std::vector<double>{1.0, 1.0, 1.0});
+                    double intensity = mat.value("intensity", 1.0);
+                    m = Material::emissive(
+                        {e[0] * intensity, e[1] * intensity, e[2] * intensity},
+                        {c[0], c[1], c[2]}
+                    );
                 }
                 
                 int id = data.scene.add_material(m);
@@ -211,6 +222,14 @@ public:
             data.samples = r.value("samples", 16);
             data.max_depth = r.value("max_depth", 50);
             data.output_file = r.value("output", "output.png");
+            
+            // Parse render mode
+            std::string mode_str = r.value("mode", "whitted");
+            if (mode_str == "pathtrace" || mode_str == "pathtracing" || mode_str == "path") {
+                data.mode = RenderMode::PathTrace;
+            } else {
+                data.mode = RenderMode::Whitted;
+            }
         }
         
         std::cout << "Loaded scene: " << data.scene.spheres.size() << " spheres, "

@@ -31,6 +31,7 @@ enum class MaterialType {
 struct Material {
     MaterialType type = MaterialType::Lambertian;
     color albedo = {0.5, 0.5, 0.5};  // Base color (used if no texture)
+    color emission = {0.0, 0.0, 0.0}; // Emissive color (for path tracing lights)
     Texture texture;                  // Texture for the material
     bool has_texture = false;         // Whether to use texture instead of albedo
     double fuzz = 0.0;                // Metal roughness (0 = mirror)
@@ -44,6 +45,13 @@ struct Material {
             return texture.sample(p, u, v);
         }
         return albedo;
+    }
+    
+    /**
+     * @brief Check if material is emissive
+     */
+    bool is_emissive() const {
+        return emission.x > 0.0 || emission.y > 0.0 || emission.z > 0.0;
     }
     
     /**
@@ -100,6 +108,18 @@ struct Material {
         m.type = MaterialType::Dielectric;
         m.albedo = {1.0, 1.0, 1.0};
         m.refraction_index = ir;
+        m.has_texture = false;
+        return m;
+    }
+    
+    /**
+     * @brief Create an emissive (light) material
+     */
+    static Material emissive(color emit, color c = {0.0, 0.0, 0.0}) {
+        Material m;
+        m.type = MaterialType::Lambertian;
+        m.albedo = c;
+        m.emission = emit;
         m.has_texture = false;
         return m;
     }

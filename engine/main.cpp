@@ -57,6 +57,7 @@ int main(int argc, char* argv[]) {
     int image_height = 1440;
     int samples = 16;
     int max_depth = 50;
+    RenderMode render_mode = RenderMode::Whitted;
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -64,17 +65,23 @@ int main(int argc, char* argv[]) {
     
     // Check for scene file argument
     bool loaded_scene = false;
-    if (argc > 1) {
-        std::string arg1 = argv[1];
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
         
-        if (arg1 == "-h" || arg1 == "--help") {
+        if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
         }
         
+        if (arg == "--pathtrace" || arg == "-p") {
+            render_mode = RenderMode::PathTrace;
+            samples = 64;  // Path tracing needs more samples
+            continue;
+        }
+        
         // Check if it's a JSON file
-        if (arg1.size() > 5 && arg1.substr(arg1.size() - 5) == ".json") {
-            auto data = SceneLoader::load(arg1);
+        if (arg.size() > 5 && arg.substr(arg.size() - 5) == ".json") {
+            auto data = SceneLoader::load(arg);
             if (!data.scene.materials.empty() || !data.scene.spheres.empty() || 
                 !data.scene.planes.empty() || !data.scene.boxes.empty()) {
                 scene = std::move(data.scene);
@@ -87,17 +94,13 @@ int main(int argc, char* argv[]) {
                 samples = data.samples;
                 max_depth = data.max_depth;
                 output_file = data.output_file;
+                render_mode = data.mode;
                 loaded_scene = true;
             }
-        } else {
+        } else if (arg[0] != '-') {
             // Assume it's an output filename
-            output_file = arg1;
+            output_file = arg;
         }
-    }
-    
-    // Override output file if provided as second argument
-    if (argc > 2) {
-        output_file = argv[2];
     }
     
     // Use demo scene if no scene was loaded
@@ -115,6 +118,7 @@ int main(int argc, char* argv[]) {
     settings.height = image_height;
     settings.max_depth = max_depth;
     settings.samples_per_pixel = samples;
+    settings.mode = render_mode;
     
     Renderer renderer(settings);
     

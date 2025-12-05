@@ -1,0 +1,77 @@
+{
+    "materials": {
+        "ground": {
+            "type": "lambertian",
+            "texture": {
+                "type": "checker",
+                "color1": [0.9, 0.9, 0.9],
+                "color2": [0.1, 0.1, 0.1],
+                "scale": 1.0
+            }
+        },
+        "blue": {
+            "type": "lambertian",
+            "color": [0.1, 0.2, 0.5]
+        },
+        "glass": {
+            "type": "glass",
+            "ior": 1.5
+        },
+        "gold": {
+            "type": "metal",
+            "color": [0.8, 0.6, 0.2],
+            "fuzz": 0.0
+        },
+        "rough_metal": {
+            "type": "metal",
+            "color": [0.7, 0.7, 0.75],
+            "fuzz": 0.3
+        }
+    },
+    "objects": [
+        {
+            "type": "plane",
+            "point": [0, -0.5, 0],
+            "normal": [0, 1, 0],
+            "material": "ground"
+        },
+        {
+            "type": "sphere",
+            "center": [0.0, 0.0, -1.0],
+            "radius": 0.5,
+            "material": "blue"
+        },
+        {
+            "type": "sphere",
+            "center": [-1.0, 0.0, -1.0],
+            "radius": 0.5,
+            "material": "glass"
+        },
+        {
+            "type": "sphere",
+            "center": [1.0, 0.0, -1.0],
+            "radius": 0.5,
+            "material": "gold"
+        },
+        {
+            "type": "sphere",
+            "center": [0.0, 0.5, -2.5],
+            "radius": 1.0,
+            "material": "rough_metal"
+        }
+    ],
+    "camera": {
+        "position": [0, 0.5, 2],
+        "target": [0, 0, -1],
+        "up": [0, 1, 0],
+        "fov": 60
+    },
+    "render": {
+        "width": 2560,
+        "height": 1440,
+        "samples": 64,
+        "max_depth": 50,
+        "mode": "pathtrace",
+        "output": "path_trace_demo.png"
+    }
+}

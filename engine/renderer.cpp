@@ -116,8 +116,9 @@ bool Image::write_png(const std::string& filename) const {
 Image Renderer::render(const Scene& scene, const Camera& camera) const {
     Image image(settings_.width, settings_.height);
     
+    const char* mode_name = (settings_.mode == RenderMode::PathTrace) ? "Path Tracing" : "Whitted";
     std::cout << "Rendering " << settings_.width << "x" << settings_.height 
-              << " image";
+              << " image (" << mode_name << ")";
     
 #ifdef _OPENMP
     std::cout << " using " << omp_get_max_threads() << " threads";
@@ -141,7 +142,13 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
                 double v = (static_cast<double>(y) + random_double()) / settings_.height;
                 
                 ray r = camera.get_ray(u, v);
-                pixel_color = vec3_add(pixel_color, ray_color(r, scene, settings_.max_depth));
+                
+                // Choose rendering mode
+                if (settings_.mode == RenderMode::PathTrace) {
+                    pixel_color = vec3_add(pixel_color, ray_color_path(r, scene, settings_.max_depth));
+                } else {
+                    pixel_color = vec3_add(pixel_color, ray_color_whitted(r, scene, settings_.max_depth));
+                }
             }
             
             // Average samples
@@ -164,7 +171,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     return image;
 }
 
-color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
+color Renderer::ray_color_whitted(ray r, const Scene& scene, int depth) const {
     // Exceeded recursion limit
     if (depth <= 0) {
         return vec3_zero();
@@ -198,7 +205,7 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 }
                 
                 ray scattered = ray_create(rec.point, scatter_direction);
-                color indirect = ray_color(scattered, scene, depth - 1);
+                color indirect = ray_color_whitted(scattered, scene, depth - 1);
                 
                 // Combine direct + indirect lighting
                 color total_light = vec3_add(direct_light, indirect);
@@ -212,7 +219,7 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 
                 // Only reflect if reflected ray goes away from surface
                 if (vec3_dot(scattered.direction, rec.normal) > 0) {
-                    return vec3_mul(surface_color, ray_color(scattered, scene, depth - 1));
+                    return vec3_mul(surface_color, ray_color_whitted(scattered, scene, depth - 1));
                 }
                 return vec3_zero();
             }
@@ -240,12 +247,95 @@ color Renderer::ray_color(ray r, const Scene& scene, int depth) const {
                 }
                 
                 ray scattered = ray_create(rec.point, direction);
-                return vec3_mul(attenuation, ray_color(scattered, scene, depth - 1));
+                return vec3_mul(attenuation, ray_color_whitted(scattered, scene, depth - 1));
             }
         }
     }
     
     // No hit - return background color
+    return background_color(r);
+}
+
+color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
+    // Exceeded recursion limit
+    if (depth <= 0) {
+        return vec3_zero();
+    }
+    
+    hit_record rec;
+    
+    // Check for intersection (t_min = 0.001 to avoid shadow acne)
+    if (scene.hit(r, 0.001, 1e9, rec)) {
+        const Material& mat = scene.get_material(rec.material_id);
+        
+        // Get emission (for light sources)
+        color emitted = mat.emission;
+        
+        // Get color from texture or albedo
+        color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
+        
+        switch (mat.type) {
+            case MaterialType::Lambertian: {
+                // Random scatter in hemisphere
+                vec3 scatter_direction = vec3_add(rec.normal, random_unit_vector());
+                if (vec3_length_squared(scatter_direction) < 1e-8) {
+                    scatter_direction = rec.normal;
+                }
+                
+                ray scattered = ray_create(rec.point, scatter_direction);
+                color incoming = ray_color_path(scattered, scene, depth - 1);
+                
+                // emission + albedo * incoming
+                return vec3_add(emitted, vec3_mul(surface_color, incoming));
+            }
+            
+            case MaterialType::Metal: {
+                // Specular reflection with optional fuzz
+                vec3 reflected = vec3_reflect(vec3_normalize(r.direction), rec.normal);
+                
+                // Add fuzz
+                if (mat.fuzz > 0.0) {
+                    vec3 fuzz_vec = vec3_scale(random_unit_vector(), mat.fuzz);
+                    reflected = vec3_add(reflected, fuzz_vec);
+                }
+                
+                ray scattered = ray_create(rec.point, reflected);
+                
+                // Only reflect if reflected ray goes away from surface
+                if (vec3_dot(scattered.direction, rec.normal) > 0) {
+                    color incoming = ray_color_path(scattered, scene, depth - 1);
+                    return vec3_add(emitted, vec3_mul(surface_color, incoming));
+                }
+                return emitted;
+            }
+            
+            case MaterialType::Dielectric: {
+                // Refraction (glass-like material)
+                double refraction_ratio = rec.front_face ? 
+                    (1.0 / mat.refraction_index) : mat.refraction_index;
+                
+                vec3 unit_direction = vec3_normalize(r.direction);
+                double cos_theta = std::fmin(vec3_dot(vec3_negate(unit_direction), rec.normal), 1.0);
+                double sin_theta = std::sqrt(1.0 - cos_theta * cos_theta);
+                
+                bool cannot_refract = refraction_ratio * sin_theta > 1.0;
+                vec3 direction;
+                
+                // Use random number for probabilistic Fresnel reflection
+                if (cannot_refract || Material::reflectance(cos_theta, refraction_ratio) > random_double()) {
+                    direction = vec3_reflect(unit_direction, rec.normal);
+                } else {
+                    direction = vec3_refract(unit_direction, rec.normal, refraction_ratio);
+                }
+                
+                ray scattered = ray_create(rec.point, direction);
+                color incoming = ray_color_path(scattered, scene, depth - 1);
+                return vec3_add(emitted, incoming);  // Glass doesn't absorb much
+            }
+        }
+    }
+    
+    // No hit - return background color (acts as environment light)
     return background_color(r);
 }
 

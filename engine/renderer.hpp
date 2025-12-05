@@ -20,6 +20,14 @@ extern "C" {
 namespace raytracer {
 
 /**
+ * @brief Rendering mode
+ */
+enum class RenderMode {
+    Whitted,    // Classic Whitted-style ray tracing (fast, explicit lights)
+    PathTrace   // Monte Carlo path tracing (slow, global illumination)
+};
+
+/**
  * @brief Image buffer for rendering
  */
 struct Image {
@@ -73,6 +81,7 @@ public:
         int samples_per_pixel = 16;  // Antialiasing samples (1 = no AA)
         color background_top = {0.5, 0.7, 1.0};    // Sky gradient top
         color background_bottom = {1.0, 1.0, 1.0}; // Sky gradient bottom
+        RenderMode mode = RenderMode::Whitted;     // Rendering algorithm
     };
     
     Renderer() = default;
@@ -96,9 +105,14 @@ private:
     Settings settings_;
     
     /**
-     * @brief Calculate color for a ray (recursive)
+     * @brief Calculate color for a ray - Whitted style (recursive)
      */
-    color ray_color(ray r, const Scene& scene, int depth) const;
+    color ray_color_whitted(ray r, const Scene& scene, int depth) const;
+    
+    /**
+     * @brief Calculate color for a ray - Path tracing (recursive)
+     */
+    color ray_color_path(ray r, const Scene& scene, int depth) const;
     
     /**
      * @brief Calculate background color (sky gradient)
