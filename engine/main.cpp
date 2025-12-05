@@ -71,8 +71,8 @@ int main(int argc, char* argv[]) {
     Renderer::Settings settings;
     settings.width = image_width;
     settings.height = image_height;
-    settings.max_depth = 10;
-    settings.samples_per_pixel = 1;
+    settings.max_depth = 100;
+    settings.samples_per_pixel = 8;
     
     Renderer renderer(settings);
     

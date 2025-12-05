@@ -69,8 +69,8 @@ public:
     struct Settings {
         int width = 2560;
         int height = 1440;
-        int max_depth = 10;         // Maximum recursion depth
-        int samples_per_pixel = 1;  // Antialiasing samples (1 = no AA)
+        int max_depth = 100;         // Maximum recursion depth
+        int samples_per_pixel = 8;  // Antialiasing samples (1 = no AA)
         color background_top = {0.5, 0.7, 1.0};    // Sky gradient top
         color background_bottom = {1.0, 1.0, 1.0}; // Sky gradient bottom
     };
