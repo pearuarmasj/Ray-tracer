@@ -50,6 +50,12 @@ add_executable(raytracer ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_link_libraries(raytracer PRIVATE raytracer_core)
 target_include_directories(raytracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# OpenMP for parallel rendering
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(raytracer PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 # Enable math library on Unix
 if(UNIX)
     target_link_libraries(raytracer_core PRIVATE m)

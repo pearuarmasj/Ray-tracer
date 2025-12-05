@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <iostream>
 #include <vector>
+#include <atomic>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace raytracer {
 
@@ -76,12 +81,18 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     Image image(settings_.width, settings_.height);
     
     std::cout << "Rendering " << settings_.width << "x" << settings_.height 
-              << " image..." << std::endl;
+              << " image";
     
+#ifdef _OPENMP
+    std::cout << " using " << omp_get_max_threads() << " threads";
+#endif
+    std::cout << "..." << std::endl;
+    
+    std::atomic<int> completed_lines{0};
+    const int total_lines = settings_.height;
+    
+    #pragma omp parallel for schedule(dynamic, 1)
     for (int y = 0; y < settings_.height; ++y) {
-        // Progress indicator
-        std::cout << "\rScanlines remaining: " << (settings_.height - y) << ' ' << std::flush;
-        
         for (int x = 0; x < settings_.width; ++x) {
             color pixel_color = vec3_zero();
             
@@ -98,6 +109,16 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
             // Average samples
             pixel_color = vec3_scale(pixel_color, 1.0 / settings_.samples_per_pixel);
             image.set_pixel(x, y, pixel_color);
+        }
+        
+        // Thread-safe progress update
+        int done = ++completed_lines;
+        if (done % 50 == 0 || done == total_lines) {
+            #pragma omp critical
+            {
+                std::cout << "\rProgress: " << (100 * done / total_lines) << "% (" 
+                          << done << "/" << total_lines << " lines)" << std::flush;
+            }
         }
     }
     

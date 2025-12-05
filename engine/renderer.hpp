@@ -67,8 +67,8 @@ public:
      * @brief Render settings
      */
     struct Settings {
-        int width = 400;
-        int height = 225;
+        int width = 2560;
+        int height = 1440;
         int max_depth = 10;         // Maximum recursion depth
         int samples_per_pixel = 1;  // Antialiasing samples (1 = no AA)
         color background_top = {0.5, 0.7, 1.0};    // Sky gradient top

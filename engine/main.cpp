@@ -52,9 +52,9 @@ int main(int argc, char* argv[]) {
     }
     
     // Image settings
-    const double aspect_ratio = 16.0 / 9.0;
-    const int image_width = 400;
-    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int image_width = 2560;
+    const int image_height = 1440;
+    const double aspect_ratio = static_cast<double>(image_width) / image_height;
     
     // Create camera
     point3 lookfrom = {0.0, 0.0, 0.0};
