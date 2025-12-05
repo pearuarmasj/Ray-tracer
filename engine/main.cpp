@@ -81,6 +81,32 @@ int main(int argc, char* argv[]) {
             continue;
         }
         
+        // --nee on/off flag
+        if (arg == "--nee" && i + 1 < argc) {
+            std::string val = argv[++i];
+            use_nee = (val == "on" || val == "true" || val == "1");
+            continue;
+        }
+        
+        // --mis on/off flag
+        if (arg == "--mis" && i + 1 < argc) {
+            std::string val = argv[++i];
+            use_mis = (val == "on" || val == "true" || val == "1");
+            continue;
+        }
+        
+        // --samples N flag
+        if (arg == "--samples" && i + 1 < argc) {
+            samples = std::stoi(argv[++i]);
+            continue;
+        }
+        
+        // --output filename flag
+        if (arg == "--output" && i + 1 < argc) {
+            output_file = argv[++i];
+            continue;
+        }
+        
         // Check if it's a JSON file
         if (arg.size() > 5 && arg.substr(arg.size() - 5) == ".json") {
             auto data = SceneLoader::load(arg);

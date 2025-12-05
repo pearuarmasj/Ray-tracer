@@ -247,7 +247,7 @@ public:
     }
     
     /**
-     * @brief Sample a light source (emissive geometry or point light)
+     * @brief Sample a light source (emissive geometry, point light, or environment)
      * @param from_point Surface point to sample from
      * @return LightSample, or invalid if no lights
      */
@@ -259,34 +259,88 @@ public:
         auto emissive_spheres = get_emissive_spheres();
         size_t total_lights = lights.size() + emissive_spheres.size();
         
-        if (total_lights == 0) return sample;
+        // Check if environment map is available for sampling
+        bool has_env = environment && environment->has_importance_sampling();
+        size_t env_weight = has_env ? 1 : 0;
+        size_t total_sources = total_lights + env_weight;
         
-        // Pick a random light uniformly
-        size_t light_idx = static_cast<size_t>(random_double() * total_lights);
-        if (light_idx >= total_lights) light_idx = total_lights - 1;
+        if (total_sources == 0) return sample;
         
-        if (light_idx < lights.size()) {
-            // Point light
-            const PointLight& pl = lights[light_idx];
-            sample.position = pl.position;
-            sample.normal = {0, -1, 0};  // Point lights don't have orientation
-            sample.emission = pl.intensity;
-            sample.pdf = 1.0;  // Delta distribution for point
-            vec3 to_light = vec3_sub(pl.position, from_point);
-            sample.distance = vec3_length(to_light);
-            sample.valid = true;
-        } else {
-            // Emissive sphere
-            size_t sphere_idx = emissive_spheres[light_idx - lights.size()];
-            sample = sample_sphere_light(sphere_idx, from_point);
+        // Pick a random light source
+        // Give environment map equal weight to all other lights combined for balanced sampling
+        double rand_val = random_double();
+        bool sample_environment = false;
+        
+        if (has_env && total_lights > 0) {
+            // 50% chance environment, 50% chance geometry lights
+            sample_environment = (rand_val < 0.5);
+            rand_val = (sample_environment) ? (rand_val * 2.0) : ((rand_val - 0.5) * 2.0);
+        } else if (has_env) {
+            // Only environment available
+            sample_environment = true;
         }
+        // else: only geometry lights available
         
-        // Adjust PDF for light selection probability
-        if (sample.valid) {
-            sample.pdf /= static_cast<double>(total_lights);
+        if (sample_environment) {
+            // Sample environment map
+            EnvSample env_sample = environment->sample_direction();
+            if (env_sample.valid) {
+                // Environment is at "infinity" - use a large distance
+                sample.position = vec3_add(from_point, vec3_scale(env_sample.direction, 1e6));
+                sample.normal = vec3_negate(env_sample.direction);  // Facing back toward surface
+                sample.emission = env_sample.emission;
+                sample.pdf = env_sample.pdf;
+                sample.distance = 1e6;
+                sample.valid = true;
+                
+                // Adjust PDF for light selection probability
+                if (total_lights > 0) {
+                    sample.pdf *= 0.5;  // Environment had 50% selection probability
+                }
+                // If only environment, pdf stays as-is (100% selection)
+            }
+        } else {
+            // Sample geometry lights (point lights or emissive spheres)
+            size_t light_idx = static_cast<size_t>(rand_val * total_lights);
+            if (light_idx >= total_lights) light_idx = total_lights - 1;
+            
+            if (light_idx < lights.size()) {
+                // Point light
+                const PointLight& pl = lights[light_idx];
+                sample.position = pl.position;
+                sample.normal = {0, -1, 0};  // Point lights don't have orientation
+                sample.emission = pl.intensity;
+                sample.pdf = 1.0;  // Delta distribution for point
+                vec3 to_light = vec3_sub(pl.position, from_point);
+                sample.distance = vec3_length(to_light);
+                sample.valid = true;
+            } else {
+                // Emissive sphere
+                size_t sphere_idx = emissive_spheres[light_idx - lights.size()];
+                sample = sample_sphere_light(sphere_idx, from_point);
+            }
+            
+            // Adjust PDF for light selection probability
+            if (sample.valid) {
+                sample.pdf /= static_cast<double>(total_lights);
+                if (has_env) {
+                    sample.pdf *= 0.5;  // Geometry lights had 50% selection probability
+                }
+            }
         }
         
         return sample;
+    }
+    
+    /**
+     * @brief Check if a direction hits the environment (no geometry in the way)
+     * @param from_point Starting point
+     * @param direction Direction to check
+     * @return true if direction is unoccluded to infinity
+     */
+    bool hits_environment(point3 from_point, vec3 direction) const {
+        hit_record rec;
+        return !hit(ray_create(from_point, direction), 0.001, 1e9, rec);
     }
     
     /**
@@ -298,8 +352,9 @@ public:
     double light_pdf(point3 from_point, point3 light_point) const {
         auto emissive_spheres = get_emissive_spheres();
         size_t total_lights = lights.size() + emissive_spheres.size();
+        bool has_env = environment && environment->has_importance_sampling();
         
-        if (total_lights == 0) return 0.0;
+        if (total_lights == 0 && !has_env) return 0.0;
         
         // Check which light this point belongs to
         for (size_t i = 0; i < emissive_spheres.size(); ++i) {
@@ -311,12 +366,38 @@ public:
             // Point is on sphere surface (within tolerance)
             if (std::abs(dist_sq - r_sq) < r_sq * 0.01) {
                 double area = 4.0 * 3.14159265358979323846 * r_sq;
-                return (1.0 / area) / static_cast<double>(total_lights);
+                double pdf = (1.0 / area) / static_cast<double>(total_lights);
+                if (has_env) pdf *= 0.5;  // Geometry had 50% selection probability
+                return pdf;
             }
         }
         
         // Point light (delta) - return 0 for area PDF
         return 0.0;
+    }
+    
+    /**
+     * @brief Compute PDF for sampling a direction toward the environment
+     * @param direction World-space direction toward environment
+     * @return PDF value per solid angle
+     */
+    double env_light_pdf(vec3 direction) const {
+        if (!environment || !environment->has_importance_sampling()) {
+            return 0.0;
+        }
+        
+        auto emissive_spheres = get_emissive_spheres();
+        size_t total_lights = lights.size() + emissive_spheres.size();
+        
+        double pdf = environment->pdf(direction);
+        
+        // Adjust for light selection probability
+        if (total_lights > 0) {
+            pdf *= 0.5;  // Environment had 50% selection probability
+        }
+        // If only environment, pdf stays as-is
+        
+        return pdf;
     }
     
     /**

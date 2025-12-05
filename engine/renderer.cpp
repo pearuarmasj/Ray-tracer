@@ -275,6 +275,7 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
     color accumulated = {0.0, 0.0, 0.0};
     ray current_ray = r;
     bool specular_bounce = false;
+    bool was_diffuse_bounce = false;  // Track if last bounce was diffuse (for env MIS)
     
     for (int bounce = 0; bounce < depth; ++bounce) {
         hit_record rec;
@@ -282,7 +283,17 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
         if (!scene.hit(current_ray, 0.001, 1e9, rec)) {
             // No hit - add background/environment contribution
             color bg = background_color(current_ray, scene);
-            accumulated = vec3_add(accumulated, vec3_mul(throughput, bg));
+            
+            // If NEE+MIS is active and this is after a diffuse bounce, environment
+            // was already handled by MIS in the previous iteration. Skip it here.
+            bool env_handled_by_mis = settings_.use_nee && settings_.use_mis && 
+                                      was_diffuse_bounce && 
+                                      scene.environment && 
+                                      scene.environment->has_importance_sampling();
+            
+            if (!env_handled_by_mis) {
+                accumulated = vec3_add(accumulated, vec3_mul(throughput, bg));
+            }
             break;
         }
         
@@ -298,35 +309,62 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
         vec3 scatter_dir;
         color attenuation = surface_color;
         specular_bounce = false;
+        was_diffuse_bounce = false;
         double bsdf_pdf = 0.0;  // For MIS
         
         switch (mat.type) {
             case MaterialType::Lambertian: {
-                // === NEE: Direct light sampling ===
+                // === NEE: Direct light sampling (geometry lights + environment) ===
                 if (settings_.use_nee) {
                     LightSample ls = scene.sample_light(rec.point);
                     if (ls.valid) {
-                        vec3 to_light = vec3_sub(ls.position, rec.point);
-                        double light_dist = vec3_length(to_light);
-                        vec3 light_dir = vec3_scale(to_light, 1.0 / light_dist);
+                        // Check if this is an environment sample (very large distance)
+                        bool is_env_sample = ls.distance > 1e5;
+                        
+                        vec3 light_dir;
+                        double light_dist;
+                        
+                        if (is_env_sample) {
+                            // Environment sample: direction is what matters, not position
+                            light_dir = vec3_normalize(vec3_sub(ls.position, rec.point));
+                            light_dist = 1e9;  // Effectively infinite
+                        } else {
+                            // Geometry light sample
+                            vec3 to_light = vec3_sub(ls.position, rec.point);
+                            light_dist = vec3_length(to_light);
+                            light_dir = vec3_scale(to_light, 1.0 / light_dist);
+                        }
                         
                         double cos_surf = vec3_dot(rec.normal, light_dir);
-                        double cos_light = std::abs(vec3_dot(ls.normal, vec3_negate(light_dir)));
                         
-                        if (cos_surf > 0 && cos_light > 0) {
+                        if (cos_surf > 0) {
                             // Shadow test
                             hit_record shadow_rec;
-                            if (!scene.hit(ray_create(rec.point, light_dir), 0.001, light_dist - 0.001, shadow_rec)) {
-                                // Light PDF (area) -> solid angle: pdf_area * dist^2 / cos_light
-                                double light_pdf_sa = ls.pdf * light_dist * light_dist / cos_light;
+                            bool occluded = scene.hit(ray_create(rec.point, light_dir), 0.001, 
+                                                      is_env_sample ? 1e9 : (light_dist - 0.001), shadow_rec);
+                            
+                            if (!occluded) {
+                                double light_pdf_sa;
+                                
+                                if (is_env_sample) {
+                                    // Environment: PDF is already in solid angle
+                                    light_pdf_sa = ls.pdf;
+                                } else {
+                                    // Geometry light: convert area PDF to solid angle
+                                    double cos_light = std::abs(vec3_dot(ls.normal, vec3_negate(light_dir)));
+                                    if (cos_light <= 0) goto skip_nee;  // Light facing away
+                                    light_pdf_sa = ls.pdf * light_dist * light_dist / cos_light;
+                                }
+                                
+                                if (light_pdf_sa <= 0) goto skip_nee;
+                                
                                 // BSDF PDF for this direction (cosine-weighted)
                                 double bsdf_pdf_light = cos_surf / 3.14159265358979323846;
                                 
-                                // MIS weight (power heuristic) or 1.0 if MIS disabled
+                                // MIS weight
                                 double mis_w = 1.0;
                                 if (settings_.use_mis) {
-                                    mis_w = light_pdf_sa * light_pdf_sa / 
-                                            (light_pdf_sa * light_pdf_sa + bsdf_pdf_light * bsdf_pdf_light);
+                                    mis_w = power_heuristic(light_pdf_sa, bsdf_pdf_light);
                                 }
                                 
                                 // Direct: Le * (albedo/PI) * cos_surf / light_pdf_sa * mis_w
@@ -339,6 +377,7 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
                         }
                     }
                 }
+                skip_nee:
                 
                 // Cosine-weighted hemisphere sampling for indirect
                 scatter_dir = vec3_add(rec.normal, random_unit_vector());
@@ -347,6 +386,7 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
                 }
                 scatter_dir = vec3_normalize(scatter_dir);
                 bsdf_pdf = vec3_dot(rec.normal, scatter_dir) / 3.14159265358979323846;
+                was_diffuse_bounce = true;  // Mark for environment MIS handling
                 break;
             }
             
@@ -398,11 +438,14 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
         // Create next ray
         ray next_ray = ray_create(rec.point, scatter_dir);
         
-        // MIS: If BSDF sample hits emissive surface, add with MIS weight
-        // Only when NEE is enabled (otherwise emission is added at hit)
+        // MIS: If BSDF sample hits emissive surface OR environment, add with MIS weight
+        // Only when NEE is enabled (otherwise emission is added at hit / background)
         if (settings_.use_nee && settings_.use_mis && !specular_bounce && bsdf_pdf > 0) {
             hit_record next_rec;
-            if (scene.hit(next_ray, 0.001, 1e9, next_rec)) {
+            bool hit_geometry = scene.hit(next_ray, 0.001, 1e9, next_rec);
+            
+            if (hit_geometry) {
+                // Hit geometry - check if emissive
                 const Material& next_mat = scene.get_material(next_rec.material_id);
                 if (next_mat.is_emissive()) {
                     // Compute light PDF for this hit
@@ -414,13 +457,26 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
                         double light_pdf_sa = light_pdf_area * hit_dist * hit_dist / cos_light;
                         
                         // MIS weight for BSDF sampling
-                        double mis_w = bsdf_pdf * bsdf_pdf / 
-                                      (bsdf_pdf * bsdf_pdf + light_pdf_sa * light_pdf_sa);
+                        double mis_w = power_heuristic(bsdf_pdf, light_pdf_sa);
                         
                         accumulated = vec3_add(accumulated, 
                             vec3_scale(vec3_mul(throughput, next_mat.emission), mis_w));
                     }
                 }
+            } else {
+                // Missed geometry - hit environment
+                if (scene.environment && scene.environment->has_importance_sampling()) {
+                    // Get environment contribution with MIS weight
+                    color env_emission = scene.environment->sample(scatter_dir);
+                    double env_pdf = scene.env_light_pdf(scatter_dir);
+                    
+                    if (env_pdf > 0) {
+                        double mis_w = power_heuristic(bsdf_pdf, env_pdf);
+                        accumulated = vec3_add(accumulated, 
+                            vec3_scale(vec3_mul(throughput, env_emission), mis_w));
+                    }
+                }
+                // Note: If no importance sampling, background will be added normally
             }
         }
         

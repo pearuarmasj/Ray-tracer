@@ -177,12 +177,29 @@ inline void get_sphere_uv(point3 p, double& u, double& v) {
     v = theta / 3.14159265358979323846;
 }
 
+// Forward declare random function
+double random_double();
+
 /**
- * @brief Environment map for HDR image-based lighting
+ * @brief Environment sample result for importance sampling
+ */
+struct EnvSample {
+    vec3 direction;      // Sampled direction (world space)
+    color emission;      // Environment radiance in that direction
+    double pdf;          // Probability density of this sample
+    bool valid;          // Whether sample is valid
+};
+
+/**
+ * @brief Environment map for HDR image-based lighting with importance sampling
  * 
  * Supports equirectangular HDR images (.hdr format) for realistic
  * sky lighting in path tracing. The environment map replaces the
  * default gradient background when present.
+ * 
+ * Importance sampling uses a 2D CDF built from luminance values:
+ * - marginal_cdf: 1D CDF over rows (Y), size = height+1
+ * - conditional_cdf: 2D CDF over columns (X) per row, size = height * (width+1)
  */
 struct EnvironmentMap {
     std::shared_ptr<std::vector<float>> hdr_data;
@@ -190,6 +207,11 @@ struct EnvironmentMap {
     int height = 0;
     double intensity = 1.0;      // Brightness multiplier
     double rotation = 0.0;       // Y-axis rotation in radians
+    
+    // Importance sampling CDFs
+    std::vector<double> marginal_cdf;       // CDF over rows (Y), size = height+1
+    std::vector<double> conditional_cdf;    // CDF over columns per row, size = height * (width+1)
+    double total_luminance = 0.0;           // Sum of all luminance * sin(theta) weights
     
     /**
      * @brief Load an HDR environment map from file
@@ -219,9 +241,87 @@ struct EnvironmentMap {
         
         stbi_image_free(data);
         
+        // Build importance sampling CDFs
+        env.build_sampling_cdf();
+        
         std::cout << "Loaded environment map: " << filename 
-                  << " (" << w << "x" << h << ")" << std::endl;
+                  << " (" << w << "x" << h << ", total luminance: " << env.total_luminance << ")" << std::endl;
         return env;
+    }
+    
+    /**
+     * @brief Build CDFs for importance sampling from luminance values
+     */
+    void build_sampling_cdf() {
+        if (!hdr_data || width <= 0 || height <= 0) return;
+        
+        // Using PI from raytracer namespace (defined in sphere.hpp)
+        
+        // Allocate CDF arrays
+        marginal_cdf.resize(height + 1);
+        conditional_cdf.resize(height * (width + 1));
+        
+        // Build conditional CDFs (per row) and accumulate row totals for marginal
+        std::vector<double> row_integrals(height);
+        
+        for (int y = 0; y < height; ++y) {
+            // sin(theta) weight for equirectangular projection
+            // theta = PI * (y + 0.5) / height, from top (theta=0) to bottom (theta=PI)
+            double theta = PI * (y + 0.5) / height;
+            double sin_theta = std::sin(theta);
+            
+            double row_sum = 0.0;
+            int cdf_row_offset = y * (width + 1);
+            conditional_cdf[cdf_row_offset] = 0.0;  // CDF starts at 0
+            
+            for (int x = 0; x < width; ++x) {
+                int idx = (y * width + x) * 3;
+                float r = (*hdr_data)[idx];
+                float g = (*hdr_data)[idx + 1];
+                float b = (*hdr_data)[idx + 2];
+                
+                // Luminance with sin(theta) weighting for solid angle
+                double luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                double weighted_lum = luminance * sin_theta;
+                
+                row_sum += weighted_lum;
+                conditional_cdf[cdf_row_offset + x + 1] = row_sum;
+            }
+            
+            // Normalize conditional CDF for this row
+            if (row_sum > 0.0) {
+                for (int x = 1; x <= width; ++x) {
+                    conditional_cdf[cdf_row_offset + x] /= row_sum;
+                }
+            } else {
+                // Uniform distribution if row has no luminance
+                for (int x = 1; x <= width; ++x) {
+                    conditional_cdf[cdf_row_offset + x] = static_cast<double>(x) / width;
+                }
+            }
+            
+            row_integrals[y] = row_sum;
+        }
+        
+        // Build marginal CDF from row integrals
+        marginal_cdf[0] = 0.0;
+        for (int y = 0; y < height; ++y) {
+            marginal_cdf[y + 1] = marginal_cdf[y] + row_integrals[y];
+        }
+        
+        total_luminance = marginal_cdf[height];
+        
+        // Normalize marginal CDF
+        if (total_luminance > 0.0) {
+            for (int y = 1; y <= height; ++y) {
+                marginal_cdf[y] /= total_luminance;
+            }
+        } else {
+            // Uniform distribution if no luminance
+            for (int y = 1; y <= height; ++y) {
+                marginal_cdf[y] = static_cast<double>(y) / height;
+            }
+        }
     }
     
     /**
@@ -256,7 +356,6 @@ struct EnvironmentMap {
         // Equirectangular mapping: direction -> UV
         // phi: azimuth angle around Y axis [-PI, PI] -> U [0, 1]
         // theta: elevation from -Y to +Y [-PI/2, PI/2] -> V [0, 1]
-        constexpr double PI = 3.14159265358979323846;
         double phi = std::atan2(d.z, d.x);           // [-PI, PI]
         double theta = std::asin(std::clamp(d.y, -1.0, 1.0));  // [-PI/2, PI/2]
         
@@ -299,6 +398,151 @@ struct EnvironmentMap {
         color c0 = vec3_lerp(c00, c10, tx);
         color c1 = vec3_lerp(c01, c11, tx);
         return vec3_lerp(c0, c1, ty);
+    }
+    
+    /**
+     * @brief Sample a direction from the environment map using importance sampling
+     * @return EnvSample with direction, emission, and PDF
+     */
+    EnvSample sample_direction() const {
+        EnvSample result;
+        result.valid = false;
+        
+        if (!valid() || marginal_cdf.empty() || conditional_cdf.empty()) {
+            return result;
+        }
+        
+        // Two random numbers for 2D sampling
+        double u1 = random_double();
+        double u2 = random_double();
+        
+        // Sample row (Y) from marginal CDF using binary search
+        auto row_it = std::upper_bound(marginal_cdf.begin(), marginal_cdf.end(), u1);
+        int y = static_cast<int>(row_it - marginal_cdf.begin()) - 1;
+        y = std::clamp(y, 0, height - 1);
+        
+        // Interpolate within the selected row for continuous sampling
+        double marginal_below = marginal_cdf[y];
+        double marginal_above = marginal_cdf[y + 1];
+        double row_t = (marginal_above > marginal_below) 
+            ? (u1 - marginal_below) / (marginal_above - marginal_below) 
+            : 0.0;
+        
+        // Sample column (X) from conditional CDF for this row
+        int cdf_row_offset = y * (width + 1);
+        auto col_begin = conditional_cdf.begin() + cdf_row_offset;
+        auto col_end = col_begin + width + 1;
+        auto col_it = std::upper_bound(col_begin, col_end, u2);
+        int x = static_cast<int>(col_it - col_begin) - 1;
+        x = std::clamp(x, 0, width - 1);
+        
+        // Interpolate within pixel for continuous sampling
+        double cond_below = conditional_cdf[cdf_row_offset + x];
+        double cond_above = conditional_cdf[cdf_row_offset + x + 1];
+        double col_t = (cond_above > cond_below) 
+            ? (u2 - cond_below) / (cond_above - cond_below) 
+            : 0.0;
+        
+        // Convert pixel coordinates to UV, then to direction
+        double u = (x + col_t + 0.5) / width;
+        double v = (y + row_t + 0.5) / height;
+        
+        // UV to spherical angles
+        double phi = (u - 0.5) * 2.0 * PI;    // [-PI, PI]
+        double theta = v * PI;                 // [0, PI] from top to bottom
+        
+        // Spherical to Cartesian
+        double sin_theta = std::sin(theta);
+        double cos_theta = std::cos(theta);
+        vec3 dir = {
+            sin_theta * std::cos(phi),
+            cos_theta,
+            sin_theta * std::sin(phi)
+        };
+        
+        // Apply inverse rotation (sample is in image space, need world space)
+        if (rotation != 0.0) {
+            double cos_r = std::cos(-rotation);
+            double sin_r = std::sin(-rotation);
+            double new_x = dir.x * cos_r - dir.z * sin_r;
+            double new_z = dir.x * sin_r + dir.z * cos_r;
+            dir.x = new_x;
+            dir.z = new_z;
+        }
+        
+        result.direction = dir;
+        result.emission = sample(dir);  // Get actual color (handles rotation internally)
+        result.pdf = pdf(dir);
+        result.valid = result.pdf > 0.0;
+        
+        return result;
+    }
+    
+    /**
+     * @brief Compute the PDF for sampling a given direction
+     * @param direction World-space direction
+     * @return Probability density per solid angle
+     */
+    double pdf(vec3 direction) const {
+        if (!valid() || marginal_cdf.empty() || conditional_cdf.empty() || total_luminance <= 0.0) {
+            return 0.0;
+        }
+        
+        vec3 d = vec3_normalize(direction);
+        
+        // Apply rotation to get image-space direction
+        if (rotation != 0.0) {
+            double cos_r = std::cos(rotation);
+            double sin_r = std::sin(rotation);
+            double new_x = d.x * cos_r - d.z * sin_r;
+            double new_z = d.x * sin_r + d.z * cos_r;
+            d.x = new_x;
+            d.z = new_z;
+        }
+        
+        // Direction to UV (same as in sample())
+        double phi = std::atan2(d.z, d.x);                          // [-PI, PI]
+        double theta = std::acos(std::clamp(d.y, -1.0, 1.0));       // [0, PI]
+        
+        double u = 0.5 + phi / (2.0 * PI);    // [0, 1]
+        double v = theta / PI;                 // [0, 1]
+        
+        // UV to pixel coordinates
+        int x = static_cast<int>(u * width);
+        int y = static_cast<int>(v * height);
+        x = std::clamp(x, 0, width - 1);
+        y = std::clamp(y, 0, height - 1);
+        
+        // Get PDF from CDF derivatives
+        // Marginal PDF for row y
+        double marginal_pdf = (marginal_cdf[y + 1] - marginal_cdf[y]) * height;
+        
+        // Conditional PDF for column x in row y
+        int cdf_row_offset = y * (width + 1);
+        double conditional_pdf = (conditional_cdf[cdf_row_offset + x + 1] - conditional_cdf[cdf_row_offset + x]) * width;
+        
+        // Combined PDF in UV space
+        double pdf_uv = marginal_pdf * conditional_pdf;
+        
+        // Convert from UV space to solid angle
+        // Jacobian: d(solid_angle) = sin(theta) * d(theta) * d(phi)
+        // UV covers [0,1]x[0,1] mapping to theta=[0,PI], phi=[-PI,PI]
+        // So: pdf_solid_angle = pdf_uv / (2 * PI * PI * sin(theta))
+        double sin_theta = std::sin(theta);
+        if (sin_theta < 1e-10) {
+            return 0.0;  // Avoid division by zero at poles
+        }
+        
+        double pdf_solid_angle = pdf_uv / (2.0 * PI * PI * sin_theta);
+        
+        return pdf_solid_angle;
+    }
+    
+    /**
+     * @brief Check if importance sampling is available
+     */
+    bool has_importance_sampling() const {
+        return valid() && !marginal_cdf.empty() && total_luminance > 0.0;
     }
 };
 
