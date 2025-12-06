@@ -1,0 +1,51 @@
+{
+    "render_mode": "plt",
+    "image": {
+        "width": 400,
+        "height": 300,
+        "samples_per_pixel": 16,
+        "max_depth": 8
+    },
+    "camera": {
+        "look_from": [0, 2, 5],
+        "look_at": [0, 0, 0],
+        "vup": [0, 1, 0],
+        "vfov": 45
+    },
+    "background": [0.1, 0.1, 0.15],
+    "materials": {
+        "metal_sphere": {
+            "type": "metal",
+            "albedo": [0.9, 0.9, 0.9],
+            "roughness": 0.0
+        },
+        "ground": {
+            "type": "lambertian",
+            "albedo": [0.5, 0.5, 0.5]
+        },
+        "light": {
+            "type": "emissive",
+            "emission": [8, 8, 8]
+        }
+    },
+    "objects": [
+        {
+            "type": "sphere",
+            "position": [0, 0.5, 0],
+            "radius": 0.5,
+            "material": "metal_sphere"
+        },
+        {
+            "type": "sphere",
+            "position": [0, -100, 0],
+            "radius": 100,
+            "material": "ground"
+        },
+        {
+            "type": "sphere",
+            "position": [0, 5, 2],
+            "radius": 1.5,
+            "material": "light"
+        }
+    ]
+}

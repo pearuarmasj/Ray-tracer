@@ -60,6 +60,11 @@ struct Material {
     bool has_normal_map = false;
     bool has_roughness_map = false;
     
+    // Thin-film coating (for PLT iridescence)
+    bool has_thin_film = false;
+    double thin_film_thickness = 0.0; // Film thickness in nanometers
+    double thin_film_ior = 1.4;       // Film refractive index (default ~MgF2)
+    
     /**
      * @brief Get the color at a given point
      */

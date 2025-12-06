@@ -26,7 +26,8 @@ enum class RenderMode {
     Whitted,    // Classic Whitted-style ray tracing (fast, explicit lights)
     PathTrace,  // Monte Carlo path tracing (slow, global illumination)
     BDPT,       // Bidirectional path tracing (better caustics, complex lighting)
-    Spectral    // Spectral path tracing (wavelength-dependent, dispersion)
+    Spectral,   // Spectral path tracing (wavelength-dependent, dispersion)
+    PLT         // Polarized Light Tracing (tracks polarization state)
 };
 
 /**
@@ -104,10 +105,15 @@ public:
         RenderMode mode = RenderMode::Whitted;     // Rendering algorithm
         bool use_nee = true;         // Next Event Estimation (direct light sampling)
         bool use_mis = true;         // Multiple Importance Sampling
+        bool use_mnee = true;        // Manifold NEE (caustics through glass)
+        bool use_hwss = true;        // Hero Wavelength Spectral Sampling
         ToneMapper tone_mapper = ToneMapper::ACES;  // Tone mapping operator
         double exposure = 1.0;       // Exposure adjustment (multiplier before tone mapping)
         double clamp_max = 10.0;     // Firefly clamping for BDPT (0 = disabled)
         int wavelength_samples = 8;  // Wavelength samples per pixel (spectral mode)
+        
+        // PLT settings
+        bool plt_visualize_polarization = false;  // Show polarization via hue
     };
     
     Renderer() = default;
@@ -139,6 +145,17 @@ private:
      * @brief Calculate color for a ray - Path tracing (recursive)
      */
     color ray_color_path(ray r, const Scene& scene, int depth) const;
+    
+    /**
+     * @brief Calculate color for a ray - Polarized Light Tracing
+     */
+    color ray_color_plt(ray r, const Scene& scene, int depth) const;
+    
+    /**
+     * @brief Calculate radiance for a single wavelength - Spectral PLT
+     * @param wavelength_nm Wavelength in nanometers
+     */
+    double ray_radiance_plt_spectral(ray r, const Scene& scene, int depth, double wavelength_nm) const;
     
     /**
      * @brief Calculate background color (sky gradient or environment map)

@@ -10,11 +10,13 @@ endif()
 
 project("Ray tracer" LANGUAGES C CXX)
 
-# Language standards
+# Language standards - set globally AND enforce on targets
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # C Core library (vec3, ray, hit)
 set(CORE_SOURCES
@@ -31,6 +33,13 @@ set(CORE_HEADERS
 
 add_library(raytracer_core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 target_include_directories(raytracer_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Explicitly set C23 on core library (MSVC needs this per-target)
+set_target_properties(raytracer_core PROPERTIES
+    C_STANDARD 23
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+)
 
 # C++ Engine (renderer, scene, materials)
 set(ENGINE_SOURCES
@@ -52,6 +61,13 @@ add_executable(raytracer ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_link_libraries(raytracer PRIVATE raytracer_core)
 target_include_directories(raytracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Explicitly set C++23 on raytracer (MSVC needs this per-target)
+set_target_properties(raytracer PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
 # OpenMP for parallel rendering
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
@@ -70,4 +86,17 @@ if(MSVC)
 else()
     target_compile_options(raytracer_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(raytracer PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# PLT Module Tests (optional)
+option(BUILD_PLT_TESTS "Build PLT module tests" OFF)
+if(BUILD_PLT_TESTS)
+    add_executable(plt_test engine/plt/tests/plt_test.cpp)
+    target_include_directories(plt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(plt_test PRIVATE raytracer_core)
+    set_target_properties(plt_test PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
 endif()

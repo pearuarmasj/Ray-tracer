@@ -134,6 +134,13 @@ public:
                 else if (type == "emissive") {
                     auto c = mat.value("color", std::vector<double>{1.0, 1.0, 1.0});
                     auto e = mat.value("emission", std::vector<double>{1.0, 1.0, 1.0});
+                    // Also support "emit" as alias for "emission"
+                    if (mat.contains("emit")) {
+                        auto emit_val = mat["emit"];
+                        if (emit_val.is_array() && emit_val.size() >= 3) {
+                            e = emit_val.get<std::vector<double>>();
+                        }
+                    }
                     double intensity = mat.value("intensity", 1.0);
                     m = Material::emissive(
                         {e[0] * intensity, e[1] * intensity, e[2] * intensity},
@@ -156,6 +163,16 @@ public:
                     if (!rmap_file.empty()) {
                         m.with_roughness_map(RoughnessMap::load(rmap_file));
                     }
+                }
+                
+                // Check for thin-film coating
+                if (mat.contains("thin_film")) {
+                    auto film = mat["thin_film"];
+                    double thickness = film.value("thickness", 300.0);  // nm
+                    double film_ior = film.value("ior", 1.4);           // MgF2 default
+                    m.has_thin_film = true;
+                    m.thin_film_thickness = thickness;
+                    m.thin_film_ior = film_ior;
                 }
                 
                 int id = data.scene.add_material(m);
@@ -317,6 +334,8 @@ public:
                 data.mode = RenderMode::BDPT;
             } else if (mode_str == "spectral" || mode_str == "wavelength") {
                 data.mode = RenderMode::Spectral;
+            } else if (mode_str == "plt" || mode_str == "polarized") {
+                data.mode = RenderMode::PLT;
             } else {
                 data.mode = RenderMode::Whitted;
             }
@@ -346,6 +365,33 @@ public:
                     data.scene.environment = envmap;
                 }
             }
+        }
+        
+        // Support top-level render_mode key (alternative to render.mode)
+        auto parse_render_mode = [](const std::string& mode_str) -> RenderMode {
+            if (mode_str == "pathtrace" || mode_str == "pathtracing" || mode_str == "path") {
+                return RenderMode::PathTrace;
+            } else if (mode_str == "bdpt" || mode_str == "bidirectional") {
+                return RenderMode::BDPT;
+            } else if (mode_str == "spectral" || mode_str == "wavelength") {
+                return RenderMode::Spectral;
+            } else if (mode_str == "plt" || mode_str == "polarized") {
+                return RenderMode::PLT;
+            }
+            return RenderMode::Whitted;
+        };
+        
+        if (j.contains("render_mode")) {
+            data.mode = parse_render_mode(j["render_mode"].get<std::string>());
+        }
+        
+        // Also support top-level image block (common JSON format)
+        if (j.contains("image")) {
+            auto& img = j["image"];
+            data.width = img.value("width", data.width);
+            data.height = img.value("height", data.height);
+            data.samples = img.value("samples_per_pixel", img.value("samples", data.samples));
+            data.max_depth = img.value("max_depth", data.max_depth);
         }
         
         std::cout << "Loaded scene: " << data.scene.spheres.size() << " spheres, "

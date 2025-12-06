@@ -6,6 +6,9 @@
 #include "renderer.hpp"
 #include "bdpt.hpp"
 #include "spectral/spectral_renderer.hpp"
+#include "spectral/hwss.hpp"
+#include "spectral/mnee.hpp"
+#include "plt/plt.hpp"
 #include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
@@ -20,6 +23,9 @@
 #endif
 
 namespace raytracer {
+
+// Forward declaration
+static color wavelength_to_rgb(double wavelength_nm);
 
 // Thread-local random number generator
 thread_local std::mt19937 rng{std::random_device{}()};
@@ -260,6 +266,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         case RenderMode::PathTrace: mode_name = "Path Tracing"; break;
         case RenderMode::BDPT: mode_name = "Bidirectional Path Tracing"; break;
         case RenderMode::Spectral: mode_name = "Spectral Path Tracing"; break;
+        case RenderMode::PLT: mode_name = "Polarized Light Tracing"; break;
         default: mode_name = "Whitted"; break;
     }
     
@@ -349,6 +356,25 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
                         color spec_color = spectral_integrator.render_pixel_spectral(
                             r, scene, spectral_materials, settings_.wavelength_samples);
                         pixel_color = vec3_add(pixel_color, spec_color);
+                        break;
+                    }
+                    case RenderMode::PLT: {
+                        // Use HWSS (Hero Wavelength Spectral Sampling) for correlated wavelengths
+                        // This dramatically reduces color noise by sharing paths across wavelengths
+                        double xi = random_double();
+                        auto lambdas = HWSS::sample_wavelengths_4(xi);
+                        std::array<double, 4> radiances;
+                        
+                        // Evaluate radiance for all 4 correlated wavelengths
+                        for (int w = 0; w < 4; ++w) {
+                            radiances[w] = ray_radiance_plt_spectral(r, scene, settings_.max_depth, lambdas[w]);
+                        }
+                        
+                        // Convert to RGB using HWSS weighting
+                        auto rgb = HWSS::radiances_to_rgb(radiances, lambdas);
+                        color plt_color = {rgb[0], rgb[1], rgb[2]};
+                        
+                        pixel_color = vec3_add(pixel_color, plt_color);
                         break;
                     }
                     default:
@@ -612,6 +638,24 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
                             }
                         }
                     }
+                    
+                    // === MNEE: Try to find paths through specular surfaces ===
+                    // This handles caustics where regular NEE fails due to dielectric blockers
+                    if (settings_.use_mnee) {
+                        auto [mnee_contrib, mnee_used] = MNEE::evaluate(
+                            scene, rec.point, rec.normal, 
+                            vec3_negate(vec3_normalize(current_ray.direction)), mat);
+                        
+                        if (mnee_used) {
+                            // Apply surface BSDF (Lambertian: albedo/PI)
+                            color mnee_direct = vec3_mul(
+                                vec3_mul(mnee_contrib, surface_color),
+                                throughput
+                            );
+                            mnee_direct = vec3_scale(mnee_direct, 1.0 / 3.14159265358979323846);
+                            accumulated = vec3_add(accumulated, mnee_direct);
+                        }
+                    }
                 }
                 skip_nee:
                 
@@ -732,6 +776,456 @@ color Renderer::background_color(ray r, const Scene& scene) const {
     vec3 unit_direction = vec3_normalize(r.direction);
     double t = 0.5 * (unit_direction.y + 1.0);
     return vec3_lerp(settings_.background_bottom, settings_.background_top, t);
+}
+
+// ==================== Polarized Light Tracing ====================
+
+color Renderer::ray_color_plt(ray r, const Scene& scene, int depth) const {
+    using namespace plt;
+    
+    // Start with unpolarized light (intensity 1)
+    Vec3 direction(r.direction);
+    Beam beam = Beam::unpolarized(1.0f, direction);
+    
+    color throughput = {1.0, 1.0, 1.0};
+    color accumulated = {0.0, 0.0, 0.0};
+    ray current_ray = r;
+    bool specular_bounce = false;
+    bool was_diffuse_bounce = false;
+    double bsdf_pdf = 0.0;
+    
+    for (int bounce = 0; bounce < depth; ++bounce) {
+        hit_record rec;
+        
+        if (!scene.hit(current_ray, 0.001, 1e9, rec)) {
+            // No hit - add background contribution
+            color bg = background_color(current_ray, scene);
+            float I = std::max(0.0f, beam.stokes.I);
+            
+            // If NEE+MIS handled environment on diffuse bounce, skip
+            bool env_handled_by_mis = settings_.use_nee && settings_.use_mis && 
+                                      was_diffuse_bounce && 
+                                      scene.environment && 
+                                      scene.environment->has_importance_sampling();
+            
+            if (!env_handled_by_mis) {
+                accumulated = vec3_add(accumulated, vec3_scale(vec3_mul(throughput, bg), I));
+            }
+            break;
+        }
+        
+        // Check if we hit an area light
+        if (scene.is_area_light(rec.material_id)) {
+            color light_emission = scene.get_area_light_emission(rec.material_id);
+            float I = std::max(0.0f, beam.stokes.I);
+            
+            if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+                accumulated = vec3_add(accumulated, vec3_scale(vec3_mul(throughput, light_emission), I));
+            } else if (settings_.use_mis && was_diffuse_bounce && bsdf_pdf > 0) {
+                // MIS weight for BSDF sampling hitting area light
+                double hit_dist = rec.t;
+                double cos_light = std::abs(vec3_dot(rec.normal, vec3_negate(vec3_normalize(current_ray.direction))));
+                double light_pdf_area = scene.light_pdf(vec3_zero(), rec.point);
+                
+                if (light_pdf_area > 0 && cos_light > 0) {
+                    double light_pdf_sa = light_pdf_area * hit_dist * hit_dist / cos_light;
+                    double mis_w = power_heuristic(bsdf_pdf, light_pdf_sa);
+                    accumulated = vec3_add(accumulated, 
+                        vec3_scale(vec3_mul(throughput, light_emission), I * mis_w));
+                }
+            }
+            break;
+        }
+        
+        const Material& mat = scene.get_material(rec.material_id);
+        
+        // Apply normal map if present
+        apply_normal_map(rec, mat);
+        
+        // Check for emission
+        if (mat.is_emissive()) {
+            float I = std::max(0.0f, beam.stokes.I);
+            if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+                accumulated = vec3_add(accumulated, vec3_scale(vec3_mul(throughput, mat.emission), I));
+            }
+        }
+        
+        Vec3 normal(rec.normal);
+        Vec3 wi = Vec3(current_ray.direction).normalized();
+        Vec3 wo;
+        
+        // Get surface color
+        color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
+        float albedo_avg = static_cast<float>((surface_color.x + surface_color.y + surface_color.z) / 3.0);
+        
+        specular_bounce = false;
+        was_diffuse_bounce = false;
+        bsdf_pdf = 0.0;
+        
+        switch (mat.type) {
+            case MaterialType::Lambertian: {
+                // === NEE: Direct light sampling ===
+                if (settings_.use_nee) {
+                    LightSample ls = scene.sample_light(rec.point);
+                    if (ls.valid) {
+                        bool is_env_sample = ls.distance > 1e5;
+                        
+                        vec3 light_dir;
+                        double light_dist;
+                        
+                        if (is_env_sample) {
+                            light_dir = vec3_normalize(vec3_sub(ls.position, rec.point));
+                            light_dist = 1e9;
+                        } else {
+                            vec3 to_light = vec3_sub(ls.position, rec.point);
+                            light_dist = vec3_length(to_light);
+                            light_dir = vec3_scale(to_light, 1.0 / light_dist);
+                        }
+                        
+                        double cos_surf = vec3_dot(rec.normal, light_dir);
+                        
+                        if (cos_surf > 0) {
+                            hit_record shadow_rec;
+                            bool occluded = scene.hit(ray_create(rec.point, light_dir), 0.001, 
+                                                      is_env_sample ? 1e9 : (light_dist - 0.001), shadow_rec);
+                            
+                            if (!occluded) {
+                                double light_pdf_sa;
+                                
+                                if (is_env_sample) {
+                                    light_pdf_sa = ls.pdf;
+                                } else {
+                                    double cos_light = std::abs(vec3_dot(ls.normal, vec3_negate(light_dir)));
+                                    if (cos_light <= 0) goto skip_nee_plt;
+                                    light_pdf_sa = ls.pdf * light_dist * light_dist / cos_light;
+                                }
+                                
+                                if (light_pdf_sa <= 0) goto skip_nee_plt;
+                                
+                                double bsdf_pdf_light = cos_surf / M_PI;
+                                
+                                double mis_w = 1.0;
+                                if (settings_.use_mis) {
+                                    mis_w = power_heuristic(light_pdf_sa, bsdf_pdf_light);
+                                }
+                                
+                                // Direct light contribution (diffuse depolarizes, so just use I)
+                                float I = std::max(0.0f, beam.stokes.I);
+                                color direct = vec3_scale(
+                                    vec3_mul(vec3_mul(ls.emission, surface_color), throughput),
+                                    I * cos_surf / (M_PI * light_pdf_sa) * mis_w
+                                );
+                                accumulated = vec3_add(accumulated, direct);
+                            }
+                        }
+                    }
+                    
+                    // === MNEE: Paths through specular surfaces ===
+                    if (settings_.use_mnee) {
+                        auto [mnee_contrib, mnee_used] = MNEE::evaluate(
+                            scene, rec.point, rec.normal,
+                            vec3_negate(vec3_normalize(current_ray.direction)), mat);
+                        
+                        if (mnee_used) {
+                            float I = std::max(0.0f, beam.stokes.I);
+                            color mnee_direct = vec3_mul(
+                                vec3_mul(mnee_contrib, surface_color),
+                                throughput
+                            );
+                            mnee_direct = vec3_scale(mnee_direct, I / M_PI);
+                            accumulated = vec3_add(accumulated, mnee_direct);
+                        }
+                    }
+                }
+                skip_nee_plt:
+                
+                // Diffuse scattering depolarizes
+                float r1 = static_cast<float>(random_double());
+                float r2 = static_cast<float>(random_double());
+                scatter_diffuse(beam, wo, albedo_avg, normal, r1, r2);
+                throughput = vec3_mul(throughput, surface_color);
+                bsdf_pdf = std::max(0.0, static_cast<double>(dot(wo, normal))) / M_PI;
+                was_diffuse_bounce = true;
+                break;
+            }
+            
+            case MaterialType::Metal: {
+                specular_bounce = true;
+                float eta = static_cast<float>(mat.refraction_index);
+                float k = 3.0f;
+                float fuzz_val = static_cast<float>(mat.get_roughness(rec.u, rec.v));
+                Vec3 rand_vec(random_in_unit_sphere());
+                
+                // Check for thin-film coating (note: requires spectral PLT for proper color)
+                if (mat.has_thin_film) {
+                    // For now, use middle wavelength (550nm green)
+                    // Full spectral PLT would sample multiple wavelengths
+                    float wavelength_nm = 550.0f;
+                    if (!scatter_thin_film_metal(beam, wo, wi, normal, eta, k,
+                                                  static_cast<float>(mat.thin_film_ior),
+                                                  static_cast<float>(mat.thin_film_thickness),
+                                                  wavelength_nm, albedo_avg, fuzz_val, rand_vec)) {
+                        break;
+                    }
+                } else {
+                    if (!scatter_metal(beam, wo, wi, normal, eta, k, albedo_avg, fuzz_val, rand_vec)) {
+                        break;
+                    }
+                }
+                throughput = vec3_mul(throughput, surface_color);
+                if (fuzz_val >= 0.1f) specular_bounce = false;
+                break;
+            }
+            
+            case MaterialType::Dielectric: {
+                specular_bounce = true;
+                float eta = static_cast<float>(mat.refraction_index);
+                bool entering = rec.front_face;
+                float rand_val = static_cast<float>(random_double());
+                
+                // Check for thin-film coating
+                if (mat.has_thin_film) {
+                    float wavelength_nm = 550.0f;
+                    if (!scatter_thin_film_dielectric(beam, wo, wi, normal, eta,
+                                                       static_cast<float>(mat.thin_film_ior),
+                                                       static_cast<float>(mat.thin_film_thickness),
+                                                       wavelength_nm, rand_val)) {
+                        break;
+                    }
+                } else {
+                    if (!scatter_dielectric(beam, wo, wi, normal, eta, entering, rand_val)) {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        
+        // Russian roulette after a few bounces
+        if (bounce > 3) {
+            double rr_prob = std::max(0.1, std::min(0.95, 
+                (throughput.x + throughput.y + throughput.z) / 3.0 * beam.stokes.I));
+            if (random_double() > rr_prob) {
+                break;
+            }
+            throughput = vec3_scale(throughput, 1.0 / rr_prob);
+        }
+        
+        // Update ray
+        current_ray = ray_create(rec.point, wo.to_vec3());
+    }
+    
+    return accumulated;
+}
+
+// ==================== Spectral PLT (for thin-film iridescence) ====================
+
+// Wavelength to RGB conversion (CIE 1931 approximation)
+static color wavelength_to_rgb(double wavelength_nm) {
+    double r, g, b;
+    
+    if (wavelength_nm >= 380 && wavelength_nm < 440) {
+        r = -(wavelength_nm - 440) / (440 - 380);
+        g = 0.0;
+        b = 1.0;
+    } else if (wavelength_nm >= 440 && wavelength_nm < 490) {
+        r = 0.0;
+        g = (wavelength_nm - 440) / (490 - 440);
+        b = 1.0;
+    } else if (wavelength_nm >= 490 && wavelength_nm < 510) {
+        r = 0.0;
+        g = 1.0;
+        b = -(wavelength_nm - 510) / (510 - 490);
+    } else if (wavelength_nm >= 510 && wavelength_nm < 580) {
+        r = (wavelength_nm - 510) / (580 - 510);
+        g = 1.0;
+        b = 0.0;
+    } else if (wavelength_nm >= 580 && wavelength_nm < 645) {
+        r = 1.0;
+        g = -(wavelength_nm - 645) / (645 - 580);
+        b = 0.0;
+    } else if (wavelength_nm >= 645 && wavelength_nm <= 780) {
+        r = 1.0;
+        g = 0.0;
+        b = 0.0;
+    } else {
+        r = g = b = 0.0;
+    }
+    
+    // Intensity falloff at spectrum edges
+    double factor;
+    if (wavelength_nm >= 380 && wavelength_nm < 420) {
+        factor = 0.3 + 0.7 * (wavelength_nm - 380) / (420 - 380);
+    } else if (wavelength_nm >= 420 && wavelength_nm <= 700) {
+        factor = 1.0;
+    } else if (wavelength_nm > 700 && wavelength_nm <= 780) {
+        factor = 0.3 + 0.7 * (780 - wavelength_nm) / (780 - 700);
+    } else {
+        factor = 0.0;
+    }
+    
+    return {r * factor, g * factor, b * factor};
+}
+
+double Renderer::ray_radiance_plt_spectral(ray r, const Scene& scene, int depth, double wavelength_nm) const {
+    using namespace plt;
+    
+    Vec3 direction(r.direction);
+    Beam beam = Beam::unpolarized(1.0f, direction);
+    
+    double throughput = 1.0;
+    double accumulated = 0.0;  // Accumulated radiance from NEE
+    ray current_ray = r;
+    bool specular_bounce = false;
+    
+    for (int bounce = 0; bounce < depth; ++bounce) {
+        hit_record rec;
+        
+        if (!scene.hit(current_ray, 0.001, 1e9, rec)) {
+            // Background - return accumulated + background
+            return accumulated + throughput * beam.stokes.I * 0.1;  // Dim background
+        }
+        
+        const Material& mat = scene.get_material(rec.material_id);
+        apply_normal_map(rec, mat);
+        
+        // Check if we hit an emissive surface
+        if (mat.is_emissive() || scene.is_area_light(rec.material_id)) {
+            // Only count emission on first bounce or after specular (NEE handles direct)
+            if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+                double Le = (mat.emission.x + mat.emission.y + mat.emission.z) / 3.0;
+                return accumulated + throughput * beam.stokes.I * Le;
+            }
+            // NEE already counted this, terminate
+            return accumulated;
+        }
+        
+        Vec3 normal(rec.normal);
+        Vec3 wi = Vec3(current_ray.direction).normalized();
+        Vec3 wo;
+        
+        color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
+        float albedo_avg = static_cast<float>((surface_color.x + surface_color.y + surface_color.z) / 3.0);
+        
+        specular_bounce = false;
+        
+        switch (mat.type) {
+            case MaterialType::Lambertian: {
+                // === NEE for spectral PLT ===
+                if (settings_.use_nee) {
+                    LightSample ls = scene.sample_light(rec.point);
+                    if (ls.valid && ls.distance < 1e5) {  // Skip environment for now
+                        vec3 to_light = vec3_sub(ls.position, rec.point);
+                        double light_dist = vec3_length(to_light);
+                        vec3 light_dir = vec3_scale(to_light, 1.0 / light_dist);
+                        
+                        double cos_surf = vec3_dot(rec.normal, light_dir);
+                        
+                        if (cos_surf > 0) {
+                            hit_record shadow_rec;
+                            bool occluded = scene.hit(ray_create(rec.point, light_dir), 
+                                                      0.001, light_dist - 0.001, shadow_rec);
+                            
+                            if (!occluded) {
+                                double cos_light = std::abs(vec3_dot(ls.normal, vec3_negate(light_dir)));
+                                if (cos_light > 0) {
+                                    double light_pdf_sa = ls.pdf * light_dist * light_dist / cos_light;
+                                    
+                                    if (light_pdf_sa > 0) {
+                                        // Lambertian BSDF = albedo/PI, PDF for cosine sampling = cos/PI
+                                        double bsdf_pdf = cos_surf / M_PI;
+                                        double mis_w = settings_.use_mis ? 
+                                            power_heuristic(light_pdf_sa, bsdf_pdf) : 1.0;
+                                        
+                                        // Light emission (assume white light for spectral)
+                                        double Le = (ls.emission.x + ls.emission.y + ls.emission.z) / 3.0;
+                                        
+                                        // Add NEE contribution
+                                        accumulated += throughput * beam.stokes.I * 
+                                            Le * albedo_avg * cos_surf / (M_PI * light_pdf_sa) * mis_w;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                float r1 = static_cast<float>(random_double());
+                float r2 = static_cast<float>(random_double());
+                scatter_diffuse(beam, wo, albedo_avg, normal, r1, r2);
+                throughput *= albedo_avg;
+                break;
+            }
+            
+            case MaterialType::Metal: {
+                specular_bounce = true;
+                float eta = static_cast<float>(mat.refraction_index);
+                float k = 3.0f;
+                float fuzz_val = static_cast<float>(mat.get_roughness(rec.u, rec.v));
+                Vec3 rand_vec(random_in_unit_sphere());
+                
+                if (mat.has_thin_film) {
+                    if (!scatter_thin_film_metal(beam, wo, wi, normal, eta, k,
+                                                  static_cast<float>(mat.thin_film_ior),
+                                                  static_cast<float>(mat.thin_film_thickness),
+                                                  static_cast<float>(wavelength_nm),
+                                                  albedo_avg, fuzz_val, rand_vec)) {
+                        return 0.0;
+                    }
+                } else {
+                    if (!scatter_metal(beam, wo, wi, normal, eta, k, albedo_avg, fuzz_val, rand_vec)) {
+                        return 0.0;
+                    }
+                }
+                throughput *= albedo_avg;
+                break;
+            }
+            
+            case MaterialType::Dielectric: {
+                specular_bounce = true;
+                float eta = static_cast<float>(mat.refraction_index);
+                bool entering = rec.front_face;
+                float rand_val = static_cast<float>(random_double());
+                
+                if (mat.has_thin_film) {
+                    if (!scatter_thin_film_dielectric(beam, wo, wi, normal, eta,
+                                                       static_cast<float>(mat.thin_film_ior),
+                                                       static_cast<float>(mat.thin_film_thickness),
+                                                       static_cast<float>(wavelength_nm), rand_val)) {
+                        return 0.0;
+                    }
+                } else {
+                    if (!scatter_dielectric(beam, wo, wi, normal, eta, entering, rand_val)) {
+                        return 0.0;
+                    }
+                }
+                break;
+            }
+            
+            default:
+                // Unknown or emissive material - treat as diffuse
+                {
+                    float r1 = static_cast<float>(random_double());
+                    float r2 = static_cast<float>(random_double());
+                    scatter_diffuse(beam, wo, 0.5f, normal, r1, r2);
+                    throughput *= 0.5;
+                }
+                break;
+        }
+        
+        // Russian roulette
+        if (bounce > 3) {
+            double rr_prob = std::max(0.1, std::min(0.95, throughput * beam.stokes.I));
+            if (random_double() > rr_prob) {
+                return accumulated;
+            }
+            throughput /= rr_prob;
+        }
+        
+        current_ray = ray_create(rec.point, wo.to_vec3());
+    }
+    
+    return accumulated;
 }
 
 } // namespace raytracer

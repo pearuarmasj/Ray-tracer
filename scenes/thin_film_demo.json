@@ -1,0 +1,136 @@
+{
+    "render_mode": "plt",
+    "image": {
+        "width": 2560,
+        "height": 1440,
+        "samples_per_pixel": 256,
+        "max_depth": 24
+    },
+    "render": {
+        "wavelength_samples": 16
+    },
+    "camera": {
+        "look_from": [0, 2, 6],
+        "look_at": [0, 0.5, 0],
+        "vup": [0, 1, 0],
+        "vfov": 40
+    },
+    "background": [0.05, 0.05, 0.08],
+    "materials": {
+        "thin_film_metal_300": {
+            "type": "metal",
+            "albedo": [0.95, 0.95, 0.95],
+            "roughness": 0.0,
+            "thin_film": {
+                "thickness": 300,
+                "ior": 1.4
+            }
+        },
+        "thin_film_metal_400": {
+            "type": "metal",
+            "albedo": [0.95, 0.95, 0.95],
+            "roughness": 0.0,
+            "thin_film": {
+                "thickness": 400,
+                "ior": 1.4
+            }
+        },
+        "thin_film_metal_500": {
+            "type": "metal",
+            "albedo": [0.95, 0.95, 0.95],
+            "roughness": 0.0,
+            "thin_film": {
+                "thickness": 500,
+                "ior": 1.4
+            }
+        },
+        "thin_film_glass_250": {
+            "type": "dielectric",
+            "ior": 1.5,
+            "thin_film": {
+                "thickness": 250,
+                "ior": 1.38
+            }
+        },
+        "thin_film_glass_350": {
+            "type": "dielectric",
+            "ior": 1.5,
+            "thin_film": {
+                "thickness": 350,
+                "ior": 1.38
+            }
+        },
+        "ground": {
+            "type": "lambertian",
+            "albedo": [0.5, 0.5, 0.5]
+        },
+        "light_main": {
+            "type": "emissive",
+            "emission": [8, 8, 8]
+        },
+        "light_blue": {
+            "type": "emissive",
+            "emission": [4, 4, 6]
+        },
+        "light_red": {
+            "type": "emissive",
+            "emission": [6, 4, 4]
+        }
+    },
+    "objects": [
+        {
+            "type": "sphere",
+            "position": [-1.5, 0.5, 0],
+            "radius": 0.5,
+            "material": "thin_film_metal_300"
+        },
+        {
+            "type": "sphere",
+            "position": [0, 0.5, 0],
+            "radius": 0.5,
+            "material": "thin_film_metal_400"
+        },
+        {
+            "type": "sphere",
+            "position": [1.5, 0.5, 0],
+            "radius": 0.5,
+            "material": "thin_film_metal_500"
+        },
+        {
+            "type": "sphere",
+            "position": [-0.75, 1.5, 0.5],
+            "radius": 0.4,
+            "material": "thin_film_glass_250"
+        },
+        {
+            "type": "sphere",
+            "position": [0.75, 1.5, 0.5],
+            "radius": 0.4,
+            "material": "thin_film_glass_350"
+        },
+        {
+            "type": "sphere",
+            "position": [0, -100, 0],
+            "radius": 100,
+            "material": "ground"
+        },
+        {
+            "type": "sphere",
+            "position": [0, 5, 3],
+            "radius": 1.5,
+            "material": "light_main"
+        },
+        {
+            "type": "sphere",
+            "position": [-3, 3, -2],
+            "radius": 0.8,
+            "material": "light_blue"
+        },
+        {
+            "type": "sphere",
+            "position": [3, 3, -2],
+            "radius": 0.8,
+            "material": "light_red"
+        }
+    ]
+}

@@ -1,0 +1,115 @@
+{
+    "materials": {
+        "white": {
+            "type": "lambertian",
+            "color": [0.8, 0.8, 0.8]
+        },
+        "red": {
+            "type": "lambertian",
+            "color": [0.65, 0.05, 0.05]
+        },
+        "green": {
+            "type": "lambertian",
+            "color": [0.12, 0.45, 0.15]
+        },
+        "light": {
+            "type": "emissive",
+            "color": [1.0, 1.0, 1.0],
+            "emission": [1.0, 1.0, 1.0],
+            "intensity": 15.0
+        },
+        "glass": {
+            "type": "glass",
+            "ior": 1.5
+        },
+        "mirror": {
+            "type": "metal",
+            "color": [0.95, 0.95, 0.95],
+            "fuzz": 0.0
+        },
+        "chrome": {
+            "type": "metal",
+            "color": [0.8, 0.8, 0.8],
+            "fuzz": 0.1
+        }
+    },
+    "objects": [
+        {
+            "type": "plane",
+            "position": [0, 0, 0],
+            "normal": [0, 1, 0],
+            "material": "white",
+            "comment": "floor"
+        },
+        {
+            "type": "plane",
+            "position": [0, 5, 0],
+            "normal": [0, -1, 0],
+            "material": "white",
+            "comment": "ceiling"
+        },
+        {
+            "type": "plane",
+            "position": [0, 0, -5],
+            "normal": [0, 0, 1],
+            "material": "white",
+            "comment": "back wall"
+        },
+        {
+            "type": "plane",
+            "position": [-3, 0, 0],
+            "normal": [1, 0, 0],
+            "material": "red",
+            "comment": "left wall"
+        },
+        {
+            "type": "plane",
+            "position": [3, 0, 0],
+            "normal": [-1, 0, 0],
+            "material": "green",
+            "comment": "right wall"
+        },
+        {
+            "type": "sphere",
+            "position": [-1.2, 1.0, -2.5],
+            "radius": 1.0,
+            "material": "glass",
+            "comment": "glass sphere - shows polarized Fresnel"
+        },
+        {
+            "type": "sphere",
+            "position": [1.2, 0.8, -3.0],
+            "radius": 0.8,
+            "material": "mirror",
+            "comment": "mirror sphere - polarized metal reflection"
+        },
+        {
+            "type": "sphere",
+            "position": [0.0, 0.5, -1.5],
+            "radius": 0.5,
+            "material": "chrome",
+            "comment": "chrome sphere - slightly fuzzy metal"
+        },
+        {
+            "type": "sphere",
+            "position": [0.0, 4.5, -2.5],
+            "radius": 0.5,
+            "material": "light",
+            "comment": "area light"
+        }
+    ],
+    "camera": {
+        "position": [0, 2.5, 3],
+        "target": [0, 1.5, -2.5],
+        "up": [0, 1, 0],
+        "fov": 50
+    },
+    "render": {
+        "width": 800,
+        "height": 600,
+        "samples": 64,
+        "max_depth": 16,
+        "mode": "plt",
+        "output": "plt_demo.png"
+    }
+}
