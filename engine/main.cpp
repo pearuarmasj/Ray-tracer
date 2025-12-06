@@ -64,6 +64,21 @@ int main(int argc, char* argv[]) {
     double exposure = 1.0;
     double clamp_max = 10.0;  // Firefly clamping for BDPT
     int wavelength_samples = 8;  // For spectral rendering
+    
+    // Background settings
+    color background_color = {0.0, 0.0, 0.0};
+    color background_top = {0.5, 0.7, 1.0};
+    color background_bottom = {1.0, 1.0, 1.0};
+    bool use_background_gradient = true;  // Default to gradient for backward compat
+    
+    // Photon mapping settings
+    size_t photon_count = 100000;
+    size_t caustic_photon_count = 50000;
+    int photon_gather_count = 100;
+    float photon_gather_radius = 0.5f;
+    float caustic_gather_radius = 0.1f;
+    bool photon_final_gather = false;
+    
     point3 lookfrom = {3.0, 2.0, 4.0};
     point3 lookat = {0.0, 0.0, -1.0};
     vec3 vup = {0.0, 1.0, 0.0};
@@ -173,6 +188,21 @@ int main(int argc, char* argv[]) {
                 exposure = data.exposure;
                 clamp_max = data.clamp_max;
                 wavelength_samples = data.wavelength_samples;
+                
+                // Background settings
+                background_color = data.background_color;
+                background_top = data.background_top;
+                background_bottom = data.background_bottom;
+                use_background_gradient = data.use_background_gradient;
+                
+                // Photon mapping settings
+                photon_count = data.photon_count;
+                caustic_photon_count = data.caustic_photon_count;
+                photon_gather_count = data.photon_gather_count;
+                photon_gather_radius = data.photon_gather_radius;
+                caustic_gather_radius = data.caustic_gather_radius;
+                photon_final_gather = data.photon_final_gather;
+                
                 loaded_scene = true;
             }
         } else if (arg[0] != '-') {
@@ -203,6 +233,20 @@ int main(int argc, char* argv[]) {
     settings.exposure = exposure;
     settings.clamp_max = clamp_max;
     settings.wavelength_samples = wavelength_samples;
+    
+    // Background settings
+    settings.background_color = background_color;
+    settings.background_top = background_top;
+    settings.background_bottom = background_bottom;
+    settings.use_background_gradient = use_background_gradient;
+    
+    // Photon mapping settings
+    settings.photon_count = photon_count;
+    settings.caustic_photon_count = caustic_photon_count;
+    settings.photon_gather_count = photon_gather_count;
+    settings.photon_gather_radius = photon_gather_radius;
+    settings.caustic_gather_radius = caustic_gather_radius;
+    settings.photon_final_gather = photon_final_gather;
     
     Renderer renderer(settings);
     

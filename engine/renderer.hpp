@@ -13,6 +13,7 @@ extern "C" {
 
 #include "scene.hpp"
 #include "material.hpp"
+#include "photon_map.hpp"
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -27,7 +28,9 @@ enum class RenderMode {
     PathTrace,  // Monte Carlo path tracing (slow, global illumination)
     BDPT,       // Bidirectional path tracing (better caustics, complex lighting)
     Spectral,   // Spectral path tracing (wavelength-dependent, dispersion)
-    PLT         // Polarized Light Tracing (tracks polarization state)
+    PLT,        // Polarized Light Tracing (tracks polarization state)
+    PhotonMap,  // Two-pass photon mapping (global illumination + caustics)
+    PathPhoton  // Hybrid: path tracing + caustic photons (best of both)
 };
 
 /**
@@ -100,8 +103,13 @@ public:
         int height = 1440;
         int max_depth = 50;         // Maximum recursion depth
         int samples_per_pixel = 16;  // Antialiasing samples (1 = no AA)
-        color background_top = {0.5, 0.7, 1.0};    // Sky gradient top
-        color background_bottom = {1.0, 1.0, 1.0}; // Sky gradient bottom
+        
+        // Background settings (from scene)
+        color background_color = {0.0, 0.0, 0.0};  // Solid background
+        color background_top = {0.5, 0.7, 1.0};    // Gradient top (sky)
+        color background_bottom = {1.0, 1.0, 1.0}; // Gradient bottom (horizon)
+        bool use_background_gradient = false;       // Use gradient vs solid
+        
         RenderMode mode = RenderMode::Whitted;     // Rendering algorithm
         bool use_nee = true;         // Next Event Estimation (direct light sampling)
         bool use_mis = true;         // Multiple Importance Sampling
@@ -114,6 +122,14 @@ public:
         
         // PLT settings
         bool plt_visualize_polarization = false;  // Show polarization via hue
+        
+        // Photon mapping settings
+        size_t photon_count = 100000;      // Global photons
+        size_t caustic_photon_count = 50000; // Caustic photons
+        int photon_gather_count = 100;      // Photons to gather per estimate
+        float photon_gather_radius = 0.5f;  // Maximum gather radius
+        float caustic_gather_radius = 0.1f; // Caustic gather radius (sharper)
+        bool photon_final_gather = false;   // Use final gathering
     };
     
     Renderer() = default;
@@ -145,6 +161,14 @@ private:
      * @brief Calculate color for a ray - Path tracing (recursive)
      */
     color ray_color_path(ray r, const Scene& scene, int depth) const;
+    
+    /**
+     * @brief Calculate color for a ray - Path tracing with caustic photon lookup
+     * @param caustic_map Caustic photon map for direct visualization of caustics
+     */
+    color ray_color_path_with_caustics(ray r, const Scene& scene, int depth,
+                                       const PhotonMap& caustic_map, 
+                                       int gather_count, float gather_radius) const;
     
     /**
      * @brief Calculate color for a ray - Polarized Light Tracing

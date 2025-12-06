@@ -46,6 +46,20 @@ public:
         double clamp_max = 10.0;  // Firefly clamping
         int wavelength_samples = 8;  // For spectral rendering
         
+        // Background settings
+        color background_color = {0.0, 0.0, 0.0};  // Solid background color
+        color background_top = {0.5, 0.7, 1.0};    // Gradient top (sky)
+        color background_bottom = {1.0, 1.0, 1.0}; // Gradient bottom (horizon)
+        bool use_background_gradient = false;       // Use gradient vs solid color
+        
+        // Photon mapping settings
+        size_t photon_count = 100000;
+        size_t caustic_photon_count = 50000;
+        int photon_gather_count = 100;
+        float photon_gather_radius = 0.5f;
+        float caustic_gather_radius = 0.1f;
+        bool photon_final_gather = false;
+        
         std::string output_file = "output.png";
     };
     
@@ -336,6 +350,10 @@ public:
                 data.mode = RenderMode::Spectral;
             } else if (mode_str == "plt" || mode_str == "polarized") {
                 data.mode = RenderMode::PLT;
+            } else if (mode_str == "photon" || mode_str == "photonmap") {
+                data.mode = RenderMode::PhotonMap;
+            } else if (mode_str == "pathphoton" || mode_str == "hybrid" || mode_str == "path_photon") {
+                data.mode = RenderMode::PathPhoton;
             } else {
                 data.mode = RenderMode::Whitted;
             }
@@ -346,6 +364,46 @@ public:
             else if (tm_str == "reinhard") data.tone_mapper = ToneMapper::Reinhard;
             else if (tm_str == "uncharted2") data.tone_mapper = ToneMapper::Uncharted2;
             else data.tone_mapper = ToneMapper::ACES;
+        }
+        
+        // Parse photon mapping settings
+        if (j.contains("photon_mapping")) {
+            auto& pm = j["photon_mapping"];
+            data.photon_count = pm.value("photon_count", 100000);
+            data.caustic_photon_count = pm.value("caustic_photon_count", 50000);
+            data.photon_gather_count = pm.value("gather_count", 100);
+            data.photon_gather_radius = pm.value("gather_radius", 0.5f);
+            data.caustic_gather_radius = pm.value("caustic_radius", 0.1f);
+            data.photon_final_gather = pm.value("final_gather", false);
+        }
+        
+        // Parse background settings
+        if (j.contains("background")) {
+            auto& bg = j["background"];
+            if (bg.is_array() && bg.size() >= 3) {
+                // Solid color: "background": [r, g, b]
+                data.background_color = {bg[0].get<double>(), bg[1].get<double>(), bg[2].get<double>()};
+                data.use_background_gradient = false;
+            } else if (bg.is_object()) {
+                // Object format: "background": {"color": [...]} or gradient
+                if (bg.contains("color")) {
+                    auto c = bg["color"].get<std::vector<double>>();
+                    data.background_color = {c[0], c[1], c[2]};
+                    data.use_background_gradient = false;
+                }
+                if (bg.contains("gradient")) {
+                    auto& grad = bg["gradient"];
+                    if (grad.contains("top")) {
+                        auto t = grad["top"].get<std::vector<double>>();
+                        data.background_top = {t[0], t[1], t[2]};
+                    }
+                    if (grad.contains("bottom")) {
+                        auto b = grad["bottom"].get<std::vector<double>>();
+                        data.background_bottom = {b[0], b[1], b[2]};
+                    }
+                    data.use_background_gradient = true;
+                }
+            }
         }
         
         // Load environment map (HDR sky lighting)
@@ -377,6 +435,10 @@ public:
                 return RenderMode::Spectral;
             } else if (mode_str == "plt" || mode_str == "polarized") {
                 return RenderMode::PLT;
+            } else if (mode_str == "photon" || mode_str == "photonmap") {
+                return RenderMode::PhotonMap;
+            } else if (mode_str == "pathphoton" || mode_str == "hybrid" || mode_str == "path_photon") {
+                return RenderMode::PathPhoton;
             }
             return RenderMode::Whitted;
         };

@@ -9,6 +9,7 @@
 #include "spectral/hwss.hpp"
 #include "spectral/mnee.hpp"
 #include "plt/plt.hpp"
+#include "photon_integrator.hpp"
 #include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
@@ -267,6 +268,8 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         case RenderMode::BDPT: mode_name = "Bidirectional Path Tracing"; break;
         case RenderMode::Spectral: mode_name = "Spectral Path Tracing"; break;
         case RenderMode::PLT: mode_name = "Polarized Light Tracing"; break;
+        case RenderMode::PhotonMap: mode_name = "Photon Mapping"; break;
+        case RenderMode::PathPhoton: mode_name = "Path Tracing + Caustic Photons"; break;
         default: mode_name = "Whitted"; break;
     }
     
@@ -329,6 +332,32 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         }
     }
     
+    // Create photon integrator if needed
+    PhotonIntegrator photon_integrator;
+    if (settings_.mode == RenderMode::PhotonMap || settings_.mode == RenderMode::PathPhoton) {
+        // For hybrid mode, only trace caustic photons (path tracing handles the rest)
+        bool caustic_only = (settings_.mode == RenderMode::PathPhoton);
+        
+        if (caustic_only) {
+            photon_integrator.settings.num_global_photons = 0;  // No global photons needed
+        } else {
+            photon_integrator.settings.num_global_photons = settings_.photon_count;
+        }
+        photon_integrator.settings.num_caustic_photons = settings_.caustic_photon_count;
+        photon_integrator.settings.gather_count = settings_.photon_gather_count;
+        photon_integrator.settings.gather_radius = settings_.photon_gather_radius;
+        photon_integrator.settings.caustic_radius = settings_.caustic_gather_radius;
+        photon_integrator.settings.use_final_gather = settings_.photon_final_gather;
+        
+        std::cout << "\nTracing " << (caustic_only ? "caustic " : "") << "photons..." << std::flush;
+        photon_integrator.trace_photons(scene);
+        std::cout << " Done.";
+        if (!caustic_only) {
+            std::cout << " Global: " << photon_integrator.global_map.size() << ",";
+        }
+        std::cout << " Caustic: " << photon_integrator.caustic_map.size() << std::endl;
+    }
+    
     std::atomic<int> completed_lines{0};
     const int total_lines = settings_.height;
     
@@ -360,21 +389,38 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
                     }
                     case RenderMode::PLT: {
                         // Use HWSS (Hero Wavelength Spectral Sampling) for correlated wavelengths
-                        // This dramatically reduces color noise by sharing paths across wavelengths
+                        // Wavelength count is configurable via settings
+                        int num_wavelengths = std::max(4, settings_.wavelength_samples);
                         double xi = random_double();
-                        auto lambdas = HWSS::sample_wavelengths_4(xi);
-                        std::array<double, 4> radiances;
+                        auto lambdas = HWSS::sample_wavelengths_dynamic(num_wavelengths, xi);
+                        std::vector<double> radiances(num_wavelengths);
                         
-                        // Evaluate radiance for all 4 correlated wavelengths
-                        for (int w = 0; w < 4; ++w) {
+                        // Evaluate radiance for all correlated wavelengths
+                        for (int w = 0; w < num_wavelengths; ++w) {
                             radiances[w] = ray_radiance_plt_spectral(r, scene, settings_.max_depth, lambdas[w]);
                         }
                         
-                        // Convert to RGB using HWSS weighting
-                        auto rgb = HWSS::radiances_to_rgb(radiances, lambdas);
+                        // Convert to RGB using HWSS weighting (with optional spectral MIS)
+                        auto rgb = HWSS::radiances_to_rgb_dynamic(radiances, lambdas, false);
                         color plt_color = {rgb[0], rgb[1], rgb[2]};
                         
                         pixel_color = vec3_add(pixel_color, plt_color);
+                        break;
+                    }
+                    case RenderMode::PhotonMap: {
+                        // Use photon mapping for radiance estimation
+                        color pm_color = photon_integrator.estimate_radiance(scene, r);
+                        pixel_color = vec3_add(pixel_color, pm_color);
+                        break;
+                    }
+                    case RenderMode::PathPhoton: {
+                        // Hybrid: path tracing + caustic photon lookup at diffuse surfaces
+                        color hybrid_color = ray_color_path_with_caustics(
+                            r, scene, settings_.max_depth,
+                            photon_integrator.caustic_map,
+                            settings_.photon_gather_count,
+                            settings_.caustic_gather_radius);
+                        pixel_color = vec3_add(pixel_color, hybrid_color);
                         break;
                     }
                     default:
@@ -766,16 +812,157 @@ color Renderer::ray_color_path(ray r, const Scene& scene, int depth) const {
     return accumulated;
 }
 
+// Path tracing with caustic photon lookup at diffuse surfaces
+color Renderer::ray_color_path_with_caustics(ray r, const Scene& scene, int depth,
+                                             const PhotonMap& caustic_map,
+                                             int gather_count, float gather_radius) const {
+    color throughput = {1.0, 1.0, 1.0};
+    color accumulated = {0.0, 0.0, 0.0};
+    ray current_ray = r;
+    bool specular_bounce = false;
+    
+    for (int bounce = 0; bounce < depth; ++bounce) {
+        hit_record rec;
+        
+        if (!scene.hit(current_ray, 0.001, 1e9, rec)) {
+            accumulated = vec3_add(accumulated, vec3_mul(throughput, background_color(current_ray, scene)));
+            break;
+        }
+        
+        // Check if we hit an area light
+        if (scene.is_area_light(rec.material_id)) {
+            color light_emission = scene.get_area_light_emission(rec.material_id);
+            if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+                accumulated = vec3_add(accumulated, vec3_mul(throughput, light_emission));
+            }
+            break;
+        }
+        
+        const Material& mat = scene.get_material(rec.material_id);
+        apply_normal_map(rec, mat);
+        color surface_color = mat.get_albedo(rec.point, rec.u, rec.v);
+        
+        // Emission on first hit or after specular
+        if (bounce == 0 || specular_bounce || !settings_.use_nee) {
+            accumulated = vec3_add(accumulated, vec3_mul(throughput, mat.emission));
+        }
+        
+        vec3 scatter_dir;
+        color attenuation = surface_color;
+        specular_bounce = false;
+        
+        switch (mat.type) {
+            case MaterialType::Lambertian: {
+                // === CAUSTIC PHOTON LOOKUP ===
+                // Add caustic contribution from photon map at diffuse surfaces
+                if (caustic_map.size() > 0) {
+                    color caustic = caustic_map.estimate_irradiance(
+                        rec.point, rec.normal, gather_count, gather_radius);
+                    // Modulate by surface albedo and throughput
+                    accumulated = vec3_add(accumulated, 
+                        vec3_mul(throughput, vec3_mul(surface_color, caustic)));
+                }
+                
+                // NEE for direct lighting (same as ray_color_path)
+                if (settings_.use_nee) {
+                    LightSample ls = scene.sample_light(rec.point);
+                    if (ls.valid) {
+                        vec3 to_light = vec3_sub(ls.position, rec.point);
+                        double light_dist = vec3_length(to_light);
+                        vec3 light_dir = vec3_scale(to_light, 1.0 / light_dist);
+                        double cos_surf = vec3_dot(rec.normal, light_dir);
+                        
+                        if (cos_surf > 0) {
+                            hit_record shadow_rec;
+                            bool is_env = ls.distance > 1e5;
+                            double shadow_dist = is_env ? 1e9 : light_dist - 0.001;
+                            bool occluded = scene.hit(ray_create(rec.point, light_dir), 
+                                                     0.001, shadow_dist, shadow_rec);
+                            
+                            if (!occluded) {
+                                double cos_light = std::abs(vec3_dot(ls.normal, vec3_negate(light_dir)));
+                                double falloff = is_env ? 1.0 : 1.0 / (light_dist * light_dist);
+                                color direct = vec3_scale(
+                                    vec3_mul(surface_color, ls.emission),
+                                    cos_surf * falloff * cos_light / (ls.pdf * M_PI));
+                                accumulated = vec3_add(accumulated, vec3_mul(throughput, direct));
+                            }
+                        }
+                    }
+                }
+                
+                // Cosine-weighted hemisphere sampling
+                scatter_dir = vec3_add(rec.normal, random_unit_vector());
+                if (vec3_length_squared(scatter_dir) < 1e-8) scatter_dir = rec.normal;
+                scatter_dir = vec3_normalize(scatter_dir);
+                break;
+            }
+            
+            case MaterialType::Metal: {
+                specular_bounce = true;
+                vec3 reflected = vec3_reflect(vec3_normalize(current_ray.direction), rec.normal);
+                if (mat.fuzz > 0.0) {
+                    reflected = vec3_add(reflected, vec3_scale(random_unit_vector(), mat.fuzz));
+                    specular_bounce = (mat.fuzz < 0.1);
+                }
+                scatter_dir = reflected;
+                if (vec3_dot(scatter_dir, rec.normal) <= 0) break;
+                break;
+            }
+            
+            case MaterialType::Dielectric: {
+                specular_bounce = true;
+                attenuation = {1.0, 1.0, 1.0};
+                double refraction_ratio = rec.front_face ? 
+                    (1.0 / mat.refraction_index) : mat.refraction_index;
+                vec3 unit_dir = vec3_normalize(current_ray.direction);
+                double cos_theta = std::fmin(vec3_dot(vec3_negate(unit_dir), rec.normal), 1.0);
+                double sin_theta = std::sqrt(1.0 - cos_theta * cos_theta);
+                
+                if (refraction_ratio * sin_theta > 1.0 || 
+                    Material::reflectance(cos_theta, refraction_ratio) > random_double()) {
+                    scatter_dir = vec3_reflect(unit_dir, rec.normal);
+                } else {
+                    scatter_dir = vec3_refract(unit_dir, rec.normal, refraction_ratio);
+                }
+                break;
+            }
+            
+            default:
+                return accumulated;
+        }
+        
+        throughput = vec3_mul(throughput, attenuation);
+        
+        // Russian Roulette
+        if (bounce > 3) {
+            double p = std::fmax(throughput.x, std::fmax(throughput.y, throughput.z));
+            if (p < 0.01 || random_double() > p) break;
+            throughput = vec3_scale(throughput, 1.0 / p);
+        }
+        
+        current_ray = ray_create(rec.point, scatter_dir);
+    }
+    
+    return accumulated;
+}
+
 color Renderer::background_color(ray r, const Scene& scene) const {
-    // Sample environment map if present
+    // Priority 1: Environment map (HDR lighting)
     if (scene.environment && scene.environment->valid()) {
         return scene.environment->sample(r.direction);
     }
     
-    // Fall back to sky gradient
-    vec3 unit_direction = vec3_normalize(r.direction);
-    double t = 0.5 * (unit_direction.y + 1.0);
-    return vec3_lerp(settings_.background_bottom, settings_.background_top, t);
+    // Priority 2: Use scene-defined background
+    if (settings_.use_background_gradient) {
+        // Gradient from bottom to top based on ray Y direction
+        vec3 unit_direction = vec3_normalize(r.direction);
+        double t = 0.5 * (unit_direction.y + 1.0);
+        return vec3_lerp(settings_.background_bottom, settings_.background_top, t);
+    }
+    
+    // Solid background color
+    return settings_.background_color;
 }
 
 // ==================== Polarized Light Tracing ====================
@@ -1082,8 +1269,10 @@ double Renderer::ray_radiance_plt_spectral(ray r, const Scene& scene, int depth,
         hit_record rec;
         
         if (!scene.hit(current_ray, 0.001, 1e9, rec)) {
-            // Background - return accumulated + background
-            return accumulated + throughput * beam.stokes.I * 0.1;  // Dim background
+            // Background - use scene background (luminance for spectral)
+            color bg = background_color(current_ray, scene);
+            double bg_luminance = (bg.x + bg.y + bg.z) / 3.0;
+            return accumulated + throughput * beam.stokes.I * bg_luminance;
         }
         
         const Material& mat = scene.get_material(rec.material_id);
@@ -1153,7 +1342,7 @@ double Renderer::ray_radiance_plt_spectral(ray r, const Scene& scene, int depth,
                 float r1 = static_cast<float>(random_double());
                 float r2 = static_cast<float>(random_double());
                 scatter_diffuse(beam, wo, albedo_avg, normal, r1, r2);
-                throughput *= albedo_avg;
+                // Note: scatter_diffuse already applies albedo to beam.stokes.I
                 break;
             }
             
@@ -1177,7 +1366,7 @@ double Renderer::ray_radiance_plt_spectral(ray r, const Scene& scene, int depth,
                         return 0.0;
                     }
                 }
-                throughput *= albedo_avg;
+                // Note: scatter_metal already applies albedo to beam.stokes.I
                 break;
             }
             
@@ -1208,7 +1397,7 @@ double Renderer::ray_radiance_plt_spectral(ray r, const Scene& scene, int depth,
                     float r1 = static_cast<float>(random_double());
                     float r2 = static_cast<float>(random_double());
                     scatter_diffuse(beam, wo, 0.5f, normal, r1, r2);
-                    throughput *= 0.5;
+                    // Note: scatter_diffuse already applies albedo to beam.stokes.I
                 }
                 break;
         }

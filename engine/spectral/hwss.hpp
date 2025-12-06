@@ -13,7 +13,9 @@
 #pragma once
 
 #include <array>
+#include <vector>
 #include <cmath>
+#include <algorithm>
 
 namespace raytracer {
 
@@ -147,6 +149,95 @@ public:
     static std::array<double, 3> wavelength_to_rgb_weight(double lambda) {
         XYZ xyz = wavelength_to_xyz(lambda);
         return xyz_to_rgb(xyz);
+    }
+    
+    /**
+     * @brief Get luminance weight for a wavelength (for spectral MIS)
+     * @param lambda Wavelength in nm
+     * @return Luminance (Y component of XYZ)
+     */
+    static double wavelength_luminance(double lambda) {
+        return wavelength_to_xyz(lambda).Y;
+    }
+    
+    /**
+     * @brief Generate N stratified wavelengths dynamically
+     * @param n Number of wavelength samples
+     * @param xi Random value in [0, 1)
+     * @return Vector of wavelengths in nm
+     */
+    static std::vector<double> sample_wavelengths_dynamic(int n, double xi) {
+        std::vector<double> lambdas(n);
+        
+        double hero = LAMBDA_MIN + xi * LAMBDA_RANGE;
+        lambdas[0] = hero;
+        
+        double step = LAMBDA_RANGE / n;
+        for (int i = 1; i < n; ++i) {
+            double lambda = hero + i * step;
+            if (lambda > LAMBDA_MAX) {
+                lambda -= LAMBDA_RANGE;
+            }
+            lambdas[i] = lambda;
+        }
+        
+        return lambdas;
+    }
+    
+    /**
+     * @brief Compute RGB from wavelength samples with optional MIS weighting
+     * @param radiances Vector of spectral radiance values
+     * @param lambdas Vector of wavelengths in nm
+     * @param use_mis If true, weight samples by luminance for variance reduction
+     * @return RGB color
+     */
+    static std::array<double, 3> radiances_to_rgb_dynamic(
+        const std::vector<double>& radiances,
+        const std::vector<double>& lambdas,
+        bool use_mis = false
+    ) {
+        static constexpr double EE_WHITE_R = 0.3209;
+        static constexpr double EE_WHITE_G = 0.2539;
+        static constexpr double EE_WHITE_B = 0.2426;
+        
+        size_t n = radiances.size();
+        if (n == 0) return {0, 0, 0};
+        
+        XYZ accumulated{0, 0, 0};
+        
+        if (use_mis) {
+            // MIS weighting: weight samples by their luminance contribution
+            // This reduces variance for colored lights/surfaces
+            double total_weight = 0.0;
+            std::vector<double> weights(n);
+            
+            for (size_t i = 0; i < n; ++i) {
+                weights[i] = wavelength_luminance(lambdas[i]);
+                total_weight += weights[i];
+            }
+            
+            if (total_weight > 0) {
+                for (size_t i = 0; i < n; ++i) {
+                    XYZ xyz = wavelength_to_xyz(lambdas[i]);
+                    double w = weights[i] / total_weight * n;  // Normalize to average 1
+                    accumulated += xyz * (radiances[i] / std::max(w, 0.01));
+                }
+            }
+        } else {
+            // Simple averaging
+            for (size_t i = 0; i < n; ++i) {
+                XYZ xyz = wavelength_to_xyz(lambdas[i]);
+                accumulated += xyz * radiances[i];
+            }
+        }
+        
+        double scale = 1.0 / n;
+        accumulated.X *= scale;
+        accumulated.Y *= scale;
+        accumulated.Z *= scale;
+        
+        auto rgb = xyz_to_rgb(accumulated);
+        return {rgb[0] / EE_WHITE_R, rgb[1] / EE_WHITE_G, rgb[2] / EE_WHITE_B};
     }
     
     /**

@@ -1,0 +1,53 @@
+{
+    "description": "Hybrid path tracing + caustic photons test",
+    "materials": {
+        "white": {
+            "type": "lambertian",
+            "color": [0.8, 0.8, 0.8]
+        },
+        "red": {
+            "type": "lambertian",
+            "color": [0.8, 0.2, 0.2]
+        },
+        "green": {
+            "type": "lambertian",
+            "color": [0.2, 0.8, 0.2]
+        },
+        "glass": {
+            "type": "glass",
+            "color": [1.0, 1.0, 1.0],
+            "ior": 1.5
+        },
+        "light": {
+            "type": "emissive",
+            "color": [1, 1, 1],
+            "emission": [10, 10, 10]
+        }
+    },
+    "objects": [
+        {"type": "plane", "position": [0, 0, 0], "normal": [0, 1, 0], "material": "white"},
+        {"type": "plane", "position": [0, 0, -5], "normal": [0, 0, 1], "material": "white"},
+        {"type": "plane", "position": [-4, 0, 0], "normal": [1, 0, 0], "material": "red"},
+        {"type": "plane", "position": [4, 0, 0], "normal": [-1, 0, 0], "material": "green"},
+        {"type": "sphere", "center": [0, 1, 0], "radius": 1.0, "material": "glass"},
+        {"type": "sphere", "center": [3, 4, -2], "radius": 0.8, "material": "light"}
+    ],
+    "camera": {
+        "position": [0, 3, 8],
+        "target": [0, 1, 0],
+        "up": [0, 1, 0],
+        "fov": 50
+    },
+    "render": {
+        "width": 400,
+        "height": 300,
+        "samples": 32,
+        "mode": "hybrid"
+    },
+    "photon_mapping": {
+        "caustic_photon_count": 100000,
+        "gather_count": 60,
+        "caustic_radius": 0.1
+    },
+    "output": "hybrid_test.png"
+}
