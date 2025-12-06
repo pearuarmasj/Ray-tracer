@@ -30,6 +30,36 @@
                 "value": "x64",
                 "strategy": "set"
             }
+        },
+        {
+            "name": "x64-debug-cuda",
+            "displayName": "x64 Debug (CUDA)",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "cacheVariables": {
+                "ENABLE_CUDA": "ON"
+            },
+            "environment": {
+                "CUDA_PATH": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1"
+            }
+        },
+        {
+            "name": "x64-release-cuda",
+            "displayName": "x64 Release (CUDA)",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "cacheVariables": {
+                "ENABLE_CUDA": "ON"
+            },
+            "environment": {
+                "CUDA_PATH": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1"
+            }
         }
     ],
     "buildPresets": [
@@ -41,6 +71,16 @@
         {
             "name": "x64-release",
             "configurePreset": "x64-release",
+            "configuration": "Release"
+        },
+        {
+            "name": "x64-debug-cuda",
+            "configurePreset": "x64-debug-cuda",
+            "configuration": "Debug"
+        },
+        {
+            "name": "x64-release-cuda",
+            "configurePreset": "x64-release-cuda",
             "configuration": "Release"
         }
     ]

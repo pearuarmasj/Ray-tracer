@@ -10,6 +10,7 @@
 #include "spectral/mnee.hpp"
 #include "plt/plt.hpp"
 #include "photon_integrator.hpp"
+#include "profiler.hpp"
 #include "stb_image_write.h"
 #include <fstream>
 #include <cmath>
@@ -262,6 +263,10 @@ bool Image::write_png(const std::string& filename) const {
 Image Renderer::render(const Scene& scene, const Camera& camera) const {
     Image image(settings_.width, settings_.height);
     
+    // Reset profiler for this render
+    Profiler::instance().reset();
+    Timer total_timer;
+    
     const char* mode_name;
     switch (settings_.mode) {
         case RenderMode::PathTrace: mode_name = "Path Tracing"; break;
@@ -290,7 +295,11 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
     std::cout << "..." << std::endl;
     
     // Build BVH before parallel rendering (must be single-threaded)
-    scene.build_bvh();
+    {
+        Timer bvh_timer;
+        scene.build_bvh();
+        Profiler::instance().record("BVH Build", Profiler::Duration(bvh_timer.elapsed_ms()));
+    };
     
     // Create BDPT integrator if needed
     BDPTIntegrator bdpt;
@@ -350,7 +359,11 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         photon_integrator.settings.use_final_gather = settings_.photon_final_gather;
         
         std::cout << "\nTracing " << (caustic_only ? "caustic " : "") << "photons..." << std::flush;
-        photon_integrator.trace_photons(scene);
+        {
+            Timer photon_timer;
+            photon_integrator.trace_photons(scene);
+            Profiler::instance().record("Photon Tracing", Profiler::Duration(photon_timer.elapsed_ms()));
+        }
         std::cout << " Done.";
         if (!caustic_only) {
             std::cout << " Global: " << photon_integrator.global_map.size() << ",";
@@ -358,6 +371,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         std::cout << " Caustic: " << photon_integrator.caustic_map.size() << std::endl;
     }
     
+    Timer render_timer;  // Time just the pixel rendering loop
     std::atomic<int> completed_lines{0};
     const int total_lines = settings_.height;
     
@@ -445,10 +459,24 @@ Image Renderer::render(const Scene& scene, const Camera& camera) const {
         }
     }
     
+    // Record pixel rendering time
+    Profiler::instance().record("Pixel Rendering", Profiler::Duration(render_timer.elapsed_ms()));
+    
     std::cout << "\nApplying tone mapping..." << std::flush;
-    image.apply_tone_mapping(settings_.tone_mapper, settings_.exposure);
+    {
+        Timer tonemap_timer;
+        image.apply_tone_mapping(settings_.tone_mapper, settings_.exposure);
+        Profiler::instance().record("Tone Mapping", Profiler::Duration(tonemap_timer.elapsed_ms()));
+    }
+    
+    // Record total time and print report
+    Profiler::instance().record("Total Render", Profiler::Duration(total_timer.elapsed_ms()));
     
     std::cout << " Done!" << std::endl;
+    
+    // Print profiling report
+    Profiler::instance().report();
+    
     return image;
 }
 

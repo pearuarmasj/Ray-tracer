@@ -88,13 +88,13 @@
         "position": [0, 2.5, 2],
         "target": [0, 2.5, -2.5],
         "up": [0, 1, 0],
-        "fov": 60
+        "fov": 75
     },
     "render": {
-        "width": 800,
-        "height": 800,
-        "samples": 128,
-        "max_depth": 50,
+        "width": 2560,
+        "height": 1440,
+        "samples": 8192,
+        "max_depth": 500,
         "mode": "pathtrace",
         "output": "cornell_box.png"
     }
